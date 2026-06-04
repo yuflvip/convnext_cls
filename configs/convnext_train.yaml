@@ -1,0 +1,43 @@
+task:
+  # 项目目录名称。默认输出目录模式下会写入 runs/classify/{project}/{name}
+  project: default_project
+  # 运行名称。留空时自动生成 exp_YYYYMMDDHHmmss
+  name: ""
+  seed: 42
+  # 显式输出目录。留空时使用默认路径 runs/classify/{project}/{name}
+  # 不建议直接写成字面量 "runs/classify/{project}/{name}"，因为当前不会做模板替换。
+  output: ""
+  # 为 true 时允许复用已存在的输出目录
+  exist_ok: false
+
+data:
+  root: /path/to/dataset
+  img_size: 224
+  val_ratio: 0.1
+  test_ratio: 0.1
+  num_workers: 8
+  preprocess: letterbox
+  augment_backend: gpu
+
+model:
+  name: convnext_nano.in12k_ft_in1k
+  pretrained: true
+  cache_dir: /mnt/sdb/cls_dataset_clean/pretrained_cache/huggingface/hub
+
+train:
+  epochs: 150
+  batch_size: 32
+  lr: 0.0003
+  weight_decay: 0.05
+  class_weight_mode: inv_sqrt
+  amp: true
+
+distributed:
+  backend: nccl
+  master_port: auto
+  port_range_start: 20000
+  port_range_end: 65000
+
+eval:
+  print_top_wrong: 20
+  save_predictions: true
