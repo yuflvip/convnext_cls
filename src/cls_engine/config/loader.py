@@ -73,4 +73,19 @@ def load_train_config(path: str | Path, args: object | None = None) -> TrainConf
             cfg.task.output_explicit = True
         if getattr(args, "exist_ok", None) is not None:
             cfg.task.exist_ok = bool(getattr(args, "exist_ok"))
-        _set_if_present(
+        _set_if_present(cfg.model, "name", getattr(args, "model", None))
+        _set_if_present(cfg.train, "epochs", getattr(args, "epochs", None))
+        _set_if_present(cfg.train, "batch_size", getattr(args, "batch", None))
+        _set_if_present(cfg.data, "num_workers", getattr(args, "workers", None))
+        _set_if_present(cfg.data, "preprocess", getattr(args, "preprocess", None))
+        _set_if_present(cfg.data, "augment_backend", getattr(args, "augment_backend", None))
+        _set_if_present(cfg.data, "img_size", getattr(args, "imgsz", None))
+        _set_if_present(cfg, "device", getattr(args, "device", None))
+        _set_if_present(cfg.distributed, "master_port", getattr(args, "master_port", None))
+        _set_if_present(cfg.eval, "print_top_wrong", getattr(args, "print_top_wrong", None))
+
+    if not cfg.task.name:
+        cfg.task.name = build_default_run_name()
+    cfg.data.img_size = normalize_img_size(cfg.data.img_size)
+    cfg.validate()
+    return cfg
