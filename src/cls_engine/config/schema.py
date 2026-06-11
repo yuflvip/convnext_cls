@@ -104,4 +104,14 @@ def normalize_img_size(value: int | tuple[int, int] | list[int]) -> tuple[int, i
         return (value, value)
     if isinstance(value, (tuple, list)):
         if len(value) == 1:
-     
+            size = int(value[0])
+            return (size, size)
+        if len(value) == 2:
+            return (int(value[0]), int(value[1]))
+    raise ValueError("img_size must be an int or one/two integers: HEIGHT [WIDTH]")
+
+
+def is_valid_device_spec(value: str) -> bool:
+    if value in {"auto", "cpu", "cuda"}:
+        return True
+    return re.fullmatch(r"\d+(,\d+)*", value or "") is not None

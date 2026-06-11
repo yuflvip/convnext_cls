@@ -158,4 +158,6 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
         test_counts=test_counts,
         train_indices=train_idx,
         val_indices=val_idx,
-      
+        test_indices=test_idx,
+        layout=layout,
+    )

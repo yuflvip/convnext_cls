@@ -271,4 +271,6 @@ def run_training(cfg: TrainConfig) -> None:
                 "split_mode": data.layout.mode,
             })
             print(f"Training done. Best val acc = {best_val_acc:.4f}")
-            print(f"Outputs in: {Path(cfg.task.
+            print(f"Outputs in: {Path(cfg.task.output).resolve()}")
+    finally:
+        cleanup_distributed()

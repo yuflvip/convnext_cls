@@ -111,4 +111,7 @@ def resolve_master_port(
         if lock_path is None:
             continue
         if is_port_available(port):
-            return _set_env_and_info
+            return _set_env_and_info("auto", port, config, lock_path)
+        lock_path.unlink(missing_ok=True)
+
+    raise RuntimeError(f"No available MASTER_PORT in range {start}-{end}")

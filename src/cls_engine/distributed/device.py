@@ -48,4 +48,24 @@ def validate_multi_gpu_launch(spec: DeviceSpec) -> None:
             "but this command started only one Python process. Use torchrun, for example: "
             f"torchrun --nproc_per_node={spec.requested_gpu_count} tools/train.py --device={spec.raw} ..."
         )
-    local_world_
+    local_world_size = os.environ.get("LOCAL_WORLD_SIZE")
+    if local_world_size and int(local_world_size) != spec.requested_gpu_count:
+        raise RuntimeError(
+            f"--device {spec.raw} selects {spec.requested_gpu_count} GPUs, "
+            f"but torchrun LOCAL_WORLD_SIZE={local_world_size}. "
+            f"Use --nproc_per_node={spec.requested_gpu_count} or adjust --device."
+        )
+
+
+def resolve_device(requested: str = "auto") -> torch.device:
+    spec = parse_device_spec(requested)
+    if spec.mode == "cpu":
+        return torch.device("cpu")
+    if spec.mode == "cuda":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def configure_torch_backend(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
