@@ -11,6 +11,14 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
+def clear_local_pycache(root: Path) -> int:
+    removed = 0
+    for pyc_path in Path(root).rglob("__pycache__/*.pyc"):
+        pyc_path.unlink(missing_ok=True)
+        removed += 1
+    return removed
+
+
 def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="训练图像分类模型。",
@@ -94,6 +102,7 @@ def preconfigure_cuda_visible_devices(device: str | None) -> None:
 
 
 def main(argv=None):
+    clear_local_pycache(ROOT)
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     preconfigure_cuda_visible_devices(args.device)
