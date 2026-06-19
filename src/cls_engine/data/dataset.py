@@ -7,10 +7,10 @@ from torchvision.datasets import ImageFolder
 
 @dataclass(frozen=True)
 class DatasetLayout:
-    data_root: Path
-    train_dir: Path
-    val_dir: Path | None
-    test_dir: Path | None
+    data_roots: list[Path]
+    train_dirs: list[Path]
+    val_dirs: list[Path]
+    test_dirs: list[Path]
     class_names: list[str]
     has_explicit_val: bool
     has_explicit_test: bool
@@ -47,28 +47,61 @@ def ensure_same_class_set(split_name: str, split_dir: Path, expected_class_names
         )
 
 
-def discover_dataset_layout(data_root: Path) -> DatasetLayout:
-    data_root = Path(data_root)
-    train_dir = data_root / "train"
-    val_dir = data_root / "val"
-    test_dir = data_root / "test"
-    if not train_dir.is_dir():
-        raise ValueError(f"Dataset root must contain train directory: {data_root}")
+def parse_data_roots(root_spec: str) -> list[Path]:
+    roots = [Path(item.strip()) for item in root_spec.split(",") if item.strip()]
+    if not roots:
+        raise ValueError("data.root must not be empty")
+    return roots
 
-    class_names = collect_sorted_class_names(train_dir)
-    has_explicit_val = val_dir.is_dir()
-    has_explicit_test = test_dir.is_dir()
+
+def _validate_split_presence(split_name: str, split_dirs: list[Path]) -> bool:
+    presence = [split_dir.is_dir() for split_dir in split_dirs]
+    if all(presence):
+        return True
+    if any(presence):
+        missing_roots = [str(root.parent) for root, exists in zip(split_dirs, presence) if not exists]
+        raise ValueError(
+            f"All dataset roots must consistently provide {split_name}/. "
+            f"Missing {split_name}/ under: {missing_roots}"
+        )
+    return False
+
+
+def discover_dataset_layout(data_roots: Path | list[Path]) -> DatasetLayout:
+    roots = [Path(data_roots)] if isinstance(data_roots, Path) else [Path(root) for root in data_roots]
+    train_dirs = [root / "train" for root in roots]
+    val_dirs = [root / "val" for root in roots]
+    test_dirs = [root / "test" for root in roots]
+    for root, train_dir in zip(roots, train_dirs):
+        if not train_dir.is_dir():
+            raise ValueError(f"Dataset root must contain train directory: {root}")
+
+    class_names = collect_sorted_class_names(train_dirs[0])
+    for train_dir in train_dirs[1:]:
+        actual_class_names = collect_sorted_class_names(train_dir)
+        if set(actual_class_names) != set(class_names):
+            missing = sorted(set(class_names) - set(actual_class_names))
+            extra = sorted(set(actual_class_names) - set(class_names))
+            raise ValueError(
+                f"Class set mismatch across dataset roots. "
+                f"missing(in {train_dir.parent}): {missing}; extra(in {train_dir.parent}): {extra}"
+            )
+
+    has_explicit_val = _validate_split_presence("val", val_dirs)
+    has_explicit_test = _validate_split_presence("test", test_dirs)
     if has_explicit_val:
-        ensure_same_class_set("val", val_dir, class_names)
+        for val_dir in val_dirs:
+            ensure_same_class_set("val", val_dir, class_names)
     if has_explicit_test:
-        ensure_same_class_set("test", test_dir, class_names)
+        for test_dir in test_dirs:
+            ensure_same_class_set("test", test_dir, class_names)
 
     mode = "explicit_splits" if (has_explicit_val or has_explicit_test) else "train_only_split"
     return DatasetLayout(
-        data_root=data_root,
-        train_dir=train_dir,
-        val_dir=val_dir if has_explicit_val else None,
-        test_dir=test_dir if has_explicit_test else None,
+        data_roots=roots,
+        train_dirs=train_dirs,
+        val_dirs=val_dirs if has_explicit_val else [],
+        test_dirs=test_dirs if has_explicit_test else [],
         class_names=class_names,
         has_explicit_val=has_explicit_val,
         has_explicit_test=has_explicit_test,

@@ -10,6 +10,7 @@ from torch import amp
 
 from cls_engine.config.schema import TrainConfig
 from cls_engine.data.datamodule import PreparedData, prepare_data
+from cls_engine.data.dataset import parse_data_roots
 from cls_engine.data.splits import build_class_weights
 from cls_engine.data.transforms import build_gpu_eval_batch_augment, build_gpu_train_batch_augment
 from cls_engine.distributed.ddp import (
@@ -71,13 +72,27 @@ def _dataset_layout_payload(data: PreparedData) -> dict:
     layout = data.layout
     return {
         "mode": layout.mode,
-        "train_dir": str(layout.train_dir),
-        "val_dir": str(layout.val_dir) if layout.val_dir else None,
-        "test_dir": str(layout.test_dir) if layout.test_dir else None,
+        "data_roots": [str(root) for root in layout.data_roots],
+        "train_dirs": [str(train_dir) for train_dir in layout.train_dirs],
+        "val_dirs": [str(val_dir) for val_dir in layout.val_dirs],
+        "test_dirs": [str(test_dir) for test_dir in layout.test_dirs],
         "has_explicit_val": layout.has_explicit_val,
         "has_explicit_test": layout.has_explicit_test,
+        "train_root_counts": data.train_root_counts,
+        "val_root_counts": data.val_root_counts,
+        "test_root_counts": data.test_root_counts,
         "class_names": data.class_names,
     }
+
+
+def _print_dataset_summary(data: PreparedData) -> None:
+    print("Dataset roots:")
+    for root in data.layout.data_roots:
+        print(f"  train {root}: {data.train_root_counts.get(str(root), 0)} samples")
+        if data.layout.has_explicit_val:
+            print(f"  val   {root}: {data.val_root_counts.get(str(root), 0)} samples")
+        if data.layout.has_explicit_test:
+            print(f"  test  {root}: {data.test_root_counts.get(str(root), 0)} samples")
 
 
 def _write_initial_artifacts(writer: ArtifactWriter, cfg: TrainConfig, data: PreparedData, port_info: dict) -> None:
@@ -119,9 +134,10 @@ def run_training(cfg: TrainConfig) -> None:
         range_start=cfg.distributed.port_range_start,
         range_end=cfg.distributed.port_range_end,
     )
+    normalized_data_root = ",".join(str(root) for root in parse_data_roots(cfg.data.root))
     _, port_info = resolve_master_port(
         port_cfg,
-        data_root=cfg.data.root,
+        data_root=normalized_data_root,
         model_name=cfg.model.name,
         output_dir=cfg.task.output,
         run_id=run_id,
@@ -140,6 +156,7 @@ def run_training(cfg: TrainConfig) -> None:
         data = prepare_data(cfg.data, seed=cfg.task.seed, batch_size=cfg.train.batch_size)
         writer = ArtifactWriter(out_dir) if is_main_process() else None
         if is_main_process():
+            _print_dataset_summary(data)
             _write_initial_artifacts(writer, cfg, data, port_info)
 
         train_batch_transform = None

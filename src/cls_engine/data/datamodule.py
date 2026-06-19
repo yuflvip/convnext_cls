@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import ConcatDataset, DataLoader, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from cls_engine.config.schema import DataConfig
@@ -13,9 +13,10 @@ from .dataset import (
     ImageFolderWithPath,
     compute_class_counts,
     discover_dataset_layout,
+    parse_data_roots,
     remap_dataset_to_class_order,
 )
-from .splits import compute_class_counts_from_indices, stratified_split_indices
+from .splits import stratified_split_indices
 from .transforms import build_eval_transform, build_train_transform
 
 
@@ -32,6 +33,9 @@ class PreparedData:
     train_counts: np.ndarray
     val_counts: np.ndarray
     test_counts: np.ndarray | None
+    train_root_counts: dict[str, int]
+    val_root_counts: dict[str, int]
+    test_root_counts: dict[str, int]
     train_indices: list[int]
     val_indices: list[int]
     test_indices: list[int]
@@ -46,28 +50,61 @@ def build_split_indices_for_labels(
     return stratified_split_indices(labels, cfg.val_ratio, cfg.test_ratio, seed)
 
 
+def _compute_counts_from_labels(labels: list[int], num_classes: int, indices: list[int] | None = None) -> np.ndarray:
+    counts = np.zeros(num_classes, dtype=np.int64)
+    selected_labels = labels if indices is None else [labels[index] for index in indices]
+    for label in selected_labels:
+        counts[label] += 1
+    return counts
+
+
+def _build_split_dataset(
+    split_dirs: list[Path],
+    transform,
+    class_names: list[str],
+) -> tuple[object, list[int], np.ndarray, dict[str, int]]:
+    datasets = []
+    all_labels: list[int] = []
+    total_counts = np.zeros(len(class_names), dtype=np.int64)
+    per_root_counts: dict[str, int] = {}
+    for split_dir in split_dirs:
+        dataset = ImageFolderWithPath(root=str(split_dir), transform=transform)
+        remap_dataset_to_class_order(dataset, class_names)
+        datasets.append(dataset)
+        all_labels.extend([sample[1] for sample in dataset.samples])
+        total_counts += compute_class_counts(dataset)
+        per_root_counts[str(split_dir.parent)] = len(dataset)
+    if len(datasets) == 1:
+        return datasets[0], all_labels, total_counts, per_root_counts
+    return ConcatDataset(datasets), all_labels, total_counts, per_root_counts
+
+
 def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
     train_tf = build_train_transform(cfg.img_size, augment_backend=cfg.augment_backend, preprocess=cfg.preprocess)
     val_tf = build_eval_transform(cfg.img_size, augment_backend=cfg.augment_backend, preprocess=cfg.preprocess)
-    layout = discover_dataset_layout(Path(cfg.root))
+    layout = discover_dataset_layout(parse_data_roots(cfg.root))
     class_names = layout.class_names
 
-    train_dataset_full = ImageFolderWithPath(root=str(layout.train_dir), transform=train_tf)
-    remap_dataset_to_class_order(train_dataset_full, class_names)
+    train_dataset_full, all_labels, train_dataset_counts, train_root_counts = _build_split_dataset(
+        layout.train_dirs, train_tf, class_names
+    )
 
     val_dataset_explicit = None
     test_dataset_explicit = None
     split_eval_dataset = None
+    val_root_counts: dict[str, int] = {}
+    test_root_counts: dict[str, int] = {}
     if layout.has_explicit_val:
-        val_dataset_explicit = ImageFolderWithPath(root=str(layout.val_dir), transform=val_tf)
-        remap_dataset_to_class_order(val_dataset_explicit, class_names)
+        val_dataset_explicit, _, val_counts_explicit, val_root_counts = _build_split_dataset(
+            layout.val_dirs, val_tf, class_names
+        )
     else:
-        split_eval_dataset = ImageFolderWithPath(root=str(layout.train_dir), transform=val_tf)
-        remap_dataset_to_class_order(split_eval_dataset, class_names)
+        split_eval_dataset, _, _, _ = _build_split_dataset(layout.train_dirs, val_tf, class_names)
 
     if layout.has_explicit_test:
-        test_dataset_explicit = ImageFolderWithPath(root=str(layout.test_dir), transform=val_tf)
-        remap_dataset_to_class_order(test_dataset_explicit, class_names)
+        test_dataset_explicit, _, test_counts_explicit, test_root_counts = _build_split_dataset(
+            layout.test_dirs, val_tf, class_names
+        )
 
     if layout.has_explicit_val:
         train_set = train_dataset_full
@@ -76,11 +113,10 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
         val_idx = list(range(len(val_dataset_explicit)))
         test_idx = list(range(len(test_dataset_explicit))) if test_dataset_explicit is not None else []
         test_set = test_dataset_explicit
-        train_counts = compute_class_counts(train_dataset_full)
-        val_counts = compute_class_counts(val_dataset_explicit)
-        test_counts = compute_class_counts(test_dataset_explicit) if test_dataset_explicit is not None else None
+        train_counts = train_dataset_counts
+        val_counts = val_counts_explicit
+        test_counts = test_counts_explicit if test_dataset_explicit is not None else None
     else:
-        all_labels = [sample[1] for sample in train_dataset_full.samples]
         generated_test_ratio = 0.0 if test_dataset_explicit is not None else cfg.test_ratio
         train_idx, val_idx, test_idx = stratified_split_indices(
             all_labels,
@@ -93,15 +129,15 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
         if test_dataset_explicit is not None:
             test_set = test_dataset_explicit
             test_idx = list(range(len(test_dataset_explicit)))
-            test_counts = compute_class_counts(test_dataset_explicit)
+            test_counts = test_counts_explicit
         elif test_idx:
             test_set = Subset(split_eval_dataset, test_idx)
-            test_counts = compute_class_counts_from_indices(split_eval_dataset, test_idx)
+            test_counts = _compute_counts_from_labels(all_labels, len(class_names), test_idx)
         else:
             test_set = None
             test_counts = None
-        train_counts = compute_class_counts_from_indices(train_dataset_full, train_idx)
-        val_counts = compute_class_counts_from_indices(split_eval_dataset, val_idx)
+        train_counts = _compute_counts_from_labels(all_labels, len(class_names), train_idx)
+        val_counts = _compute_counts_from_labels(all_labels, len(class_names), val_idx)
 
     train_sampler = DistributedSampler(train_set, shuffle=True, drop_last=True) if is_dist_avail_and_initialized() else None
     val_sampler = DistributedSampler(val_set, shuffle=False, drop_last=False) if is_dist_avail_and_initialized() else None
@@ -156,6 +192,9 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
         train_counts=train_counts,
         val_counts=val_counts,
         test_counts=test_counts,
+        train_root_counts=train_root_counts,
+        val_root_counts=val_root_counts,
+        test_root_counts=test_root_counts,
         train_indices=train_idx,
         val_indices=val_idx,
         test_indices=test_idx,
