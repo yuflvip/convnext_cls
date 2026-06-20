@@ -16,7 +16,16 @@ python tools/train.py \
   --model convnext_nano.in12k_ft_in1k
 ```
 
-The dataset root must contain `train/` and may contain explicit `val/` and
+The `--data` argument accepts either a single dataset root or a comma-separated
+list of dataset roots:
+
+```bash
+python tools/train.py --data /data/side
+python tools/train.py --data /data/side,/data/front
+python tools/train.py --data /data/side,
+```
+
+Each dataset root must contain `train/` and may contain explicit `val/` and
 `test/` directories:
 
 ```text
@@ -32,7 +41,15 @@ dataset_root/
     class_b/
 ```
 
-If `val/` is absent, the trainer creates a stratified split from `train/`.
+If `val/` is absent, the trainer creates a stratified split from the merged
+`train/` samples across all dataset roots.
+
+When multiple dataset roots are provided:
+
+- Every root must contain `train/`
+- Every root must expose the same class directory set
+- `val/` and `test/` must be consistent across roots: either every root has the
+  split or none of them do
 
 ## DDP
 

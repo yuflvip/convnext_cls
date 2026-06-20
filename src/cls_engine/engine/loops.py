@@ -80,11 +80,20 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def evaluate_with_details(model, loader, device, class_names: list[str], batch_transform=None) -> dict[str, Any]:
+def evaluate_with_details(
+    model,
+    loader,
+    device,
+    class_names: list[str],
+    batch_transform=None,
+    log_interval: int = 0,
+    log_prefix: str = "Eval",
+) -> dict[str, Any]:
     model.eval()
     if batch_transform is not None:
         batch_transform.eval()
     class_count = len(class_names)
+    start = now()
     total_loss_sum = 0.0
     total_correct_top1 = 0
     total_correct_top5 = 0
@@ -92,7 +101,7 @@ def evaluate_with_details(model, loader, device, class_names: list[str], batch_t
     cm_local = torch.zeros((class_count, class_count), device=device, dtype=torch.int64)
     preds_local = []
 
-    for x, y, paths in loader:
+    for it, (x, y, paths) in enumerate(loader):
         x = x.to(device, non_blocking=True)
         y = y.to(device, non_blocking=True)
         if batch_transform is not None:
@@ -115,6 +124,16 @@ def evaluate_with_details(model, loader, device, class_names: list[str], batch_t
             conf.detach().cpu().tolist(),
         ):
             preds_local.append([path, int(gt_i), int(pr_i), float(cf)])
+
+        if log_interval > 0 and is_main_process() and ((it + 1) % log_interval == 0):
+            elapsed = now() - start
+            avg_batch_time = elapsed / max(it + 1, 1)
+            remaining_batches = max(len(loader) - (it + 1), 0)
+            eta_sec = avg_batch_time * remaining_batches
+            print(
+                f"[{log_prefix}] {it + 1}/{len(loader)} batches | "
+                f"{total_num} images | elapsed={elapsed:.1f}s | eta={eta_sec:.1f}s"
+            )
 
     t_loss = reduce_sum(torch.tensor(total_loss_sum, device=device, dtype=torch.float64))
     t_cor_top1 = reduce_sum(torch.tensor(total_correct_top1, device=device, dtype=torch.float64))

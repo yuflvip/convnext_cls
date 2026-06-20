@@ -20,13 +20,14 @@ data:
   augment_backend: gpu
 
 model:
+  # convnext_nano.in12k_ft_in1k / hgnetv2_b4.ssld_stage2_ft_in1k
   name: convnext_nano.in12k_ft_in1k
   pretrained: true
   cache_dir: /mnt/sdb/cls_dataset_clean/pretrained_cache/huggingface/hub
 
 train:
-  epochs: 150
-  batch_size: 32
+  epochs: 100
+  batch_size: 64
   lr: 0.0003
   weight_decay: 0.05
   class_weight_mode: inv_sqrt
@@ -39,5 +40,5 @@ distributed:
   port_range_end: 65000
 
 eval:
-  print_top_wrong: 20
+  print_top_wrong: 50
   save_predictions: true
