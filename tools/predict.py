@@ -29,7 +29,7 @@ def build_arg_parser():
         "--preprocess",
         type=str,
         default="letterbox",
-        choices=["letterbox", "crop"],
+        choices=["letterbox", "crop", "stretch"],
         help="预处理方式。默认: %(default)s",
     )
     parser.add_argument("--topk", type=int, default=3, help="输出 top-k 结果数。默认: %(default)s")

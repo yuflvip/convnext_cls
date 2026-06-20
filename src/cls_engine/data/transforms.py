@@ -61,6 +61,14 @@ def build_train_transform(
             transforms.ToTensor(),
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])
+    if preprocess == "stretch":
+        return transforms.Compose([
+            transforms.Resize(crop_size),
+            transforms.RandomHorizontalFlip(p=0.6),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.02),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ])
     if augment_backend == "gpu":
         return transforms.Compose([
             transforms.Resize(_resize_size(crop_size)),
@@ -90,6 +98,12 @@ def build_eval_transform(
             ])
         return transforms.Compose([
             LetterboxTransform(crop_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ])
+    if preprocess == "stretch":
+        return transforms.Compose([
+            transforms.Resize(crop_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ])

@@ -81,8 +81,8 @@ class TrainConfig:
             raise ValueError("val_ratio + test_ratio must be less than 1")
         if self.train.class_weight_mode not in {"inv", "inv_sqrt"}:
             raise ValueError("class_weight_mode must be 'inv' or 'inv_sqrt'")
-        if self.data.preprocess not in {"crop", "letterbox"}:
-            raise ValueError("preprocess must be 'crop' or 'letterbox'")
+        if self.data.preprocess not in {"crop", "letterbox", "stretch"}:
+            raise ValueError("preprocess must be 'crop', 'letterbox', or 'stretch'")
         if self.data.augment_backend not in {"cpu", "gpu"}:
             raise ValueError("augment_backend must be 'cpu' or 'gpu'")
         if self.distributed.backend not in {"nccl", "gloo"}:
