@@ -21,7 +21,7 @@ def build_arg_parser():
     parser.add_argument("--format", type=str, default="pth", choices=["pth", "onnx"], help="预测后端格式。默认: %(default)s")
     parser.add_argument("--model", type=str, required=True, help="待预测的模型权重路径。必填。")
     parser.add_argument("--input", type=str, required=True, help="输入图片路径或目录。必填。")
-    parser.add_argument("--output", type=str, default=None, help="输出目录。可为空。默认: {model_stem}_predictions")
+    parser.add_argument("--output", type=str, default=None, help="输出目录。可为空。默认: runs/predict/predict_YYYYMMDDHHmmss")
     parser.add_argument("--classes", type=str, default=None, help="类别文件路径。ONNX 模式可为空，默认尝试读取模型同目录 classes.json")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="预测设备。默认: %(default)s")
     parser.add_argument("--imgsz", type=str, default="224", help="输入尺寸。支持: 224 或 256,384。默认: %(default)s")
@@ -33,6 +33,7 @@ def build_arg_parser():
         help="预处理方式。默认: %(default)s",
     )
     parser.add_argument("--topk", type=int, default=3, help="输出 top-k 结果数。默认: %(default)s")
+    parser.add_argument("--arrange_mode", type=str, default=None, choices=["copy", "move"], help="按预测类别整理图片。可选: copy, move。默认: 不整理")
     return parser
 
 
@@ -53,6 +54,7 @@ def main(argv=None):
             imgsz=args.imgsz,
             preprocess=args.preprocess,
             topk=args.topk,
+            arrange_mode=args.arrange_mode,
         )
     else:
         output_dir = predict_with_onnx(
@@ -64,6 +66,7 @@ def main(argv=None):
             preprocess=args.preprocess,
             topk=args.topk,
             classes_path=args.classes,
+            arrange_mode=args.arrange_mode,
         )
     print(f"Predictions saved to: {output_dir.resolve()}")
 

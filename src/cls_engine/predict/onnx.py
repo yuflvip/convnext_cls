@@ -8,6 +8,7 @@ from PIL import Image
 from cls_engine.data.transforms import build_eval_transform
 
 from .predictor import (
+    arrange_prediction_outputs,
     collect_input_images,
     load_onnx_classes,
     parse_predict_imgsz,
@@ -42,6 +43,7 @@ def predict_with_onnx(
     preprocess: str = "letterbox",
     topk: int = 3,
     classes_path: str | Path | None = None,
+    arrange_mode: str | None = None,
 ) -> Path:
     import onnxruntime as ort
 
@@ -80,4 +82,5 @@ def predict_with_onnx(
 
     output_dir = resolve_prediction_output_dir(model_path, output)
     write_prediction_outputs(output_dir, rows)
+    arrange_prediction_outputs(output_dir, rows, arrange_mode=arrange_mode)
     return output_dir

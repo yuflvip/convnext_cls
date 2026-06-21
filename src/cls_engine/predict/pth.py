@@ -11,6 +11,7 @@ from cls_engine.models.checkpoint import load_checkpoint
 from cls_engine.models.factory import build_model
 
 from .predictor import (
+    arrange_prediction_outputs,
     collect_input_images,
     parse_predict_imgsz,
     resolve_prediction_output_dir,
@@ -42,6 +43,7 @@ def predict_with_checkpoint(
     imgsz: str = "224",
     preprocess: str = "letterbox",
     topk: int = 3,
+    arrange_mode: str | None = None,
 ) -> Path:
     info = load_predict_checkpoint_info(model_path)
     input_size = parse_predict_imgsz(imgsz)
@@ -79,4 +81,5 @@ def predict_with_checkpoint(
 
     output_dir = resolve_prediction_output_dir(model_path, output)
     write_prediction_outputs(output_dir, rows)
+    arrange_prediction_outputs(output_dir, rows, arrange_mode=arrange_mode)
     return output_dir
