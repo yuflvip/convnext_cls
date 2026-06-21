@@ -14,6 +14,7 @@ from .predictor import (
     arrange_prediction_outputs,
     collect_input_images,
     parse_predict_imgsz,
+    print_prediction_progress,
     resolve_prediction_output_dir,
     write_prediction_outputs,
 )
@@ -61,7 +62,8 @@ def predict_with_checkpoint(
     effective_topk = max(1, min(topk, info["num_classes"]))
 
     with torch.no_grad():
-        for path in image_paths:
+        total_images = len(image_paths)
+        for index, path in enumerate(image_paths, start=1):
             image = Image.open(path).convert("RGB")
             x = transform(image).unsqueeze(0).to(torch_device)
             logits = model(x)
@@ -69,15 +71,15 @@ def predict_with_checkpoint(
             conf, pred = probs.max(dim=0)
             values, indices = probs.topk(effective_topk)
             topk_rows = [[info["classes"][int(idx)], float(val)] for val, idx in zip(values.cpu().tolist(), indices.cpu().tolist())]
-            rows.append(
-                {
-                    "path": str(path),
-                    "pred_idx": int(pred.item()),
-                    "pred_name": info["classes"][int(pred.item())],
-                    "conf": float(conf.item()),
-                    "topk": topk_rows,
-                }
-            )
+            row = {
+                "path": str(path),
+                "pred_idx": int(pred.item()),
+                "pred_name": info["classes"][int(pred.item())],
+                "conf": float(conf.item()),
+                "topk": topk_rows,
+            }
+            rows.append(row)
+            print_prediction_progress(index, total_images, row)
 
     output_dir = resolve_prediction_output_dir(model_path, output)
     write_prediction_outputs(output_dir, rows)

@@ -67,6 +67,13 @@ def write_prediction_outputs(output_dir: str | Path, rows: list[dict]) -> None:
     write_json(output_dir / "predictions.json", rows)
 
 
+def print_prediction_progress(index: int, total: int, row: dict) -> None:
+    print(
+        f"[Predict] {index}/{total} {row['path']} -> "
+        f"class={row['pred_name']} id={row['pred_idx']} conf={row['conf']:.4f}"
+    )
+
+
 def arrange_prediction_outputs(output_dir: str | Path, rows: list[dict], arrange_mode: str | None) -> None:
     if not arrange_mode:
         return

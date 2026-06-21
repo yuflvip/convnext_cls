@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import sys
 import tempfile
@@ -38,6 +39,108 @@ def _load_predict_parser():
         assert spec.loader is not None
         spec.loader.exec_module(module)
     return module.build_arg_parser
+
+
+def _load_predict_runtime_modules():
+    stub_torch = types.ModuleType("torch")
+
+    class FakeNoGrad:
+        def __call__(self, fn=None):
+            if fn is None:
+                return self
+            return fn
+
+        def __enter__(self):
+            return None
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    stub_torch.no_grad = FakeNoGrad
+    stub_torch.device = lambda value: value
+    stub_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+    class FakeProbVector:
+        def __getitem__(self, index):
+            return self
+
+        def max(self, dim=0):
+            return types.SimpleNamespace(item=lambda: 0.95), types.SimpleNamespace(item=lambda: 1)
+
+        def topk(self, k):
+            return (
+                types.SimpleNamespace(cpu=lambda: types.SimpleNamespace(tolist=lambda: [0.95])),
+                types.SimpleNamespace(cpu=lambda: types.SimpleNamespace(tolist=lambda: [1])),
+            )
+
+    stub_torch.softmax = lambda logits, dim=1: FakeProbVector()
+
+    class FakeTensor:
+        def unsqueeze(self, dim):
+            return self
+
+        def to(self, device):
+            return self
+
+    class FakeImage:
+        def convert(self, mode):
+            return self
+
+    stub_pil_image = types.SimpleNamespace(open=lambda path: FakeImage())
+    stub_pil = types.ModuleType("PIL")
+    stub_pil.Image = stub_pil_image
+
+    stub_transforms = types.ModuleType("cls_engine.data.transforms")
+    stub_transforms.build_eval_transform = lambda *args, **kwargs: (lambda image: FakeTensor())
+
+    stub_checkpoint = types.ModuleType("cls_engine.models.checkpoint")
+    stub_checkpoint.load_checkpoint = lambda *args, **kwargs: {
+        "classes": ["cat", "dog"],
+        "model_name": "demo_model",
+        "state_dict": {"weight": 1},
+    }
+
+    class FakeModel:
+        def to(self, device):
+            return self
+
+        def load_state_dict(self, state_dict, strict=True):
+            self.state_dict = state_dict
+
+        def eval(self):
+            return self
+
+        def __call__(self, x):
+            return "fake_logits"
+
+    stub_factory = types.ModuleType("cls_engine.models.factory")
+    stub_factory.build_model = lambda *args, **kwargs: FakeModel()
+
+    predictor_spec = importlib.util.spec_from_file_location("test_predictor_runtime", SRC / "cls_engine" / "predict" / "predictor.py")
+    predictor_module = importlib.util.module_from_spec(predictor_spec)
+    sys.modules["test_predictor_runtime"] = predictor_module
+    assert predictor_spec.loader is not None
+    predictor_spec.loader.exec_module(predictor_module)
+
+    with mock.patch.dict(
+        sys.modules,
+        {
+            "torch": stub_torch,
+            "PIL": stub_pil,
+            "PIL.Image": stub_pil_image,
+            "cls_engine.data.transforms": stub_transforms,
+            "cls_engine.models.checkpoint": stub_checkpoint,
+            "cls_engine.models.factory": stub_factory,
+            "test_predict_runtime.predictor": predictor_module,
+        },
+        clear=False,
+    ):
+        pth_spec = importlib.util.spec_from_file_location("test_predict_runtime.pth", SRC / "cls_engine" / "predict" / "pth.py")
+        pth_module = importlib.util.module_from_spec(pth_spec)
+        sys.modules["test_predict_runtime.pth"] = pth_module
+        assert pth_spec.loader is not None
+        pth_spec.loader.exec_module(pth_module)
+
+    return predictor_module, pth_module
 
 
 class PredictArrangeTests(unittest.TestCase):
@@ -103,6 +206,25 @@ class PredictArrangeTests(unittest.TestCase):
             arrange_prediction_outputs(output_dir, rows, arrange_mode="copy")
 
             self.assertEqual(target.read_bytes(), b"new-content")
+
+    def test_predict_with_checkpoint_prints_path_class_id_and_conf(self):
+        predictor_module, pth_module = _load_predict_runtime_modules()
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            image_path = base / "demo.jpg"
+            image_path.write_bytes(b"img")
+
+            with mock.patch.object(predictor_module, "collect_input_images", return_value=[image_path]):
+                with mock.patch("builtins.print") as mock_print:
+                    pth_module.predict_with_checkpoint(model_path=base / "best.pth", input_path=base)
+
+        printed_lines = [" ".join(str(arg) for arg in call.args) for call in mock_print.call_args_list]
+        self.assertTrue(
+            any(
+                f"[Predict] 1/1 {image_path} -> class=dog id=1 conf=0.9500" in line
+                for line in printed_lines
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from .predictor import (
     collect_input_images,
     load_onnx_classes,
     parse_predict_imgsz,
+    print_prediction_progress,
     resolve_prediction_output_dir,
     write_prediction_outputs,
 )
@@ -60,7 +61,8 @@ def predict_with_onnx(
     effective_topk = max(1, min(topk, len(classes)))
 
     rows = []
-    for path in image_paths:
+    total_images = len(image_paths)
+    for index, path in enumerate(image_paths, start=1):
         image = Image.open(path).convert("RGB")
         x = transform(image).unsqueeze(0).numpy().astype(np.float32)
         logits = session.run(None, {input_name: x})[0][0]
@@ -70,15 +72,15 @@ def predict_with_onnx(
         probs = probs / np.sum(probs)
         pred_idx = int(np.argmax(probs))
         topk_indices = np.argsort(probs)[::-1][:effective_topk]
-        rows.append(
-            {
-                "path": str(path),
-                "pred_idx": pred_idx,
-                "pred_name": classes[pred_idx],
-                "conf": float(probs[pred_idx]),
-                "topk": [[classes[int(idx)], float(probs[int(idx)])] for idx in topk_indices],
-            }
-        )
+        row = {
+            "path": str(path),
+            "pred_idx": pred_idx,
+            "pred_name": classes[pred_idx],
+            "conf": float(probs[pred_idx]),
+            "topk": [[classes[int(idx)], float(probs[int(idx)])] for idx in topk_indices],
+        }
+        rows.append(row)
+        print_prediction_progress(index, total_images, row)
 
     output_dir = resolve_prediction_output_dir(model_path, output)
     write_prediction_outputs(output_dir, rows)
