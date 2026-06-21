@@ -95,6 +95,10 @@ def _print_dataset_summary(data: PreparedData) -> None:
             print(f"  test  {root}: {data.test_root_counts.get(str(root), 0)} samples")
 
 
+def _print_startup_stage(message: str) -> None:
+    print(f"[Startup] {message}")
+
+
 def _write_initial_artifacts(writer: ArtifactWriter, cfg: TrainConfig, data: PreparedData, port_info: dict) -> None:
     writer.write_classes(data.class_names)
     writer.write_run_config({
@@ -153,14 +157,30 @@ def run_training(cfg: TrainConfig) -> None:
         configure_torch_backend(device)
         out_dir = ensure_dir(cfg.task.output) if is_main_process() else Path(cfg.task.output)
 
-        data = prepare_data(cfg.data, seed=cfg.task.seed, batch_size=cfg.train.batch_size)
+        def _progress_logger(message: str) -> None:
+            if is_main_process():
+                print(message)
+
+        if is_main_process():
+            _print_startup_stage("preparing data...")
+        data_start = time.perf_counter()
+        data = prepare_data(
+            cfg.data,
+            seed=cfg.task.seed,
+            batch_size=cfg.train.batch_size,
+            progress_logger=_progress_logger if is_main_process() else None,
+        )
+        data_elapsed = time.perf_counter() - data_start
         writer = ArtifactWriter(out_dir) if is_main_process() else None
         if is_main_process():
+            _print_startup_stage(f"data prepared in {data_elapsed:.1f}s")
             _print_dataset_summary(data)
             _write_initial_artifacts(writer, cfg, data, port_info)
 
         train_batch_transform = None
         eval_batch_transform = None
+        if is_main_process():
+            _print_startup_stage("building model...")
         if cfg.data.augment_backend == "gpu":
             train_batch_transform = build_gpu_train_batch_augment(cfg.data.img_size, preprocess=cfg.data.preprocess).to(device)
             eval_batch_transform = build_gpu_eval_batch_augment(cfg.data.img_size, preprocess=cfg.data.preprocess).to(device)
@@ -193,6 +213,8 @@ def run_training(cfg: TrainConfig) -> None:
             sampler = getattr(data.train_loader, "sampler", None)
             if hasattr(sampler, "set_epoch"):
                 sampler.set_epoch(epoch)
+            if epoch == 1 and is_main_process():
+                _print_startup_stage("starting training loop...")
 
             train_loss, train_acc_top1, train_acc_top5, train_time = train_one_epoch(
                 model,
@@ -204,6 +226,8 @@ def run_training(cfg: TrainConfig) -> None:
                 criterion,
                 log_interval=50,
                 batch_transform=train_batch_transform,
+                announce_first_batch_wait=(epoch == 1),
+                announce_prefix="Train",
             )
             for _ in range(len(data.train_loader)):
                 scheduler.step()

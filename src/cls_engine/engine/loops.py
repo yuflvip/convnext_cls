@@ -30,6 +30,8 @@ def train_one_epoch(
     criterion,
     log_interval=50,
     batch_transform=None,
+    announce_first_batch_wait: bool = False,
+    announce_prefix: str = "Train",
 ):
     model.train()
     if batch_transform is not None:
@@ -39,6 +41,9 @@ def train_one_epoch(
     total_correct_top1 = 0
     total_correct_top5 = 0
     total_num = 0
+
+    if announce_first_batch_wait and is_main_process():
+        print(f"[{announce_prefix}] waiting for first batch...")
 
     for it, batch in enumerate(loader):
         x, y = batch[0], batch[1]

@@ -20,6 +20,11 @@ from .splits import stratified_split_indices
 from .transforms import build_eval_transform, build_train_transform
 
 
+def _emit_progress(progress_logger, message: str) -> None:
+    if progress_logger is not None:
+        progress_logger(message)
+
+
 @dataclass
 class PreparedData:
     class_names: list[str]
@@ -79,12 +84,14 @@ def _build_split_dataset(
     return ConcatDataset(datasets), all_labels, total_counts, per_root_counts
 
 
-def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
+def prepare_data(cfg: DataConfig, seed: int, batch_size: int, progress_logger=None) -> PreparedData:
     train_tf = build_train_transform(cfg.img_size, augment_backend=cfg.augment_backend, preprocess=cfg.preprocess)
     val_tf = build_eval_transform(cfg.img_size, augment_backend=cfg.augment_backend, preprocess=cfg.preprocess)
+    _emit_progress(progress_logger, "[Data] discovering dataset layout...")
     layout = discover_dataset_layout(parse_data_roots(cfg.root))
     class_names = layout.class_names
 
+    _emit_progress(progress_logger, "[Data] building train dataset...")
     train_dataset_full, all_labels, train_dataset_counts, train_root_counts = _build_split_dataset(
         layout.train_dirs, train_tf, class_names
     )
@@ -94,6 +101,7 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
     split_eval_dataset = None
     val_root_counts: dict[str, int] = {}
     test_root_counts: dict[str, int] = {}
+    _emit_progress(progress_logger, "[Data] building val dataset...")
     if layout.has_explicit_val:
         val_dataset_explicit, _, val_counts_explicit, val_root_counts = _build_split_dataset(
             layout.val_dirs, val_tf, class_names
@@ -102,6 +110,7 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
         split_eval_dataset, _, _, _ = _build_split_dataset(layout.train_dirs, val_tf, class_names)
 
     if layout.has_explicit_test:
+        _emit_progress(progress_logger, "[Data] building test dataset...")
         test_dataset_explicit, _, test_counts_explicit, test_root_counts = _build_split_dataset(
             layout.test_dirs, val_tf, class_names
         )
@@ -147,6 +156,7 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int) -> PreparedData:
         else None
     )
 
+    _emit_progress(progress_logger, "[Data] creating dataloaders...")
     train_loader = DataLoader(
         train_set,
         batch_size=batch_size,
