@@ -25,8 +25,8 @@ def build_arg_parser():
     parser.add_argument(
         "--preprocess",
         type=str,
-        default="letterbox",
-        choices=["letterbox", "crop", "stretch"],
+        default="stretch",
+        choices=["stretch", "letterbox", "crop"],
         help="预处理方式。默认: %(default)s",
     )
     parser.add_argument("--batch", type=int, default=32, help="评估 batch size。默认: %(default)s")

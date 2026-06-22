@@ -16,7 +16,7 @@ data:
   val_ratio: 0.1
   test_ratio: 0.1
   num_workers: 8
-  preprocess: letterbox
+  preprocess: stretch
   augment_backend: gpu
 
 model:

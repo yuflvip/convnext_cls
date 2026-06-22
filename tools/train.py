@@ -57,8 +57,8 @@ def build_arg_parser():
         "--preprocess",
         type=str,
         default=None,
-        choices=["letterbox", "crop", "stretch"],
-        help="预处理方式。可为空。可选: letterbox, crop, stretch。默认: 取配置文件 data.preprocess",
+        choices=["stretch", "letterbox", "crop"],
+        help="预处理方式。可为空。可选: stretch拉伸, letterbox等比, crop裁剪。默认: 取配置文件 data.preprocess",
     )
     parser.add_argument(
         "--augment_backend",

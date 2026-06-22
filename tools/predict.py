@@ -28,8 +28,8 @@ def build_arg_parser():
     parser.add_argument(
         "--preprocess",
         type=str,
-        default="letterbox",
-        choices=["letterbox", "crop", "stretch"],
+        default="stretch",
+        choices=["stretch", "letterbox", "crop"],
         help="预处理方式。默认: %(default)s",
     )
     parser.add_argument("--topk", type=int, default=3, help="输出 top-k 结果数。默认: %(default)s")
