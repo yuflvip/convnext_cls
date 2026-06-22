@@ -2,6 +2,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -253,7 +254,7 @@ class EvalToolTests(unittest.TestCase):
         self.assertEqual(args.data, "/tmp/val")
         self.assertEqual(args.device, "auto")
         self.assertEqual(args.imgsz, "224")
-        self.assertEqual(args.preprocess, "letterbox")
+        self.assertEqual(args.preprocess, "stretch")
         self.assertEqual(args.log_interval, 1)
 
     def test_eval_cli_accepts_custom_log_interval(self):
@@ -264,9 +265,9 @@ class EvalToolTests(unittest.TestCase):
         self.assertEqual(args.log_interval, 5)
 
     def test_resolve_eval_output_dir_defaults_under_runs_eval(self):
-        resolved = resolve_eval_output_dir("/tmp/demo/best.pth", None)
+        resolved = resolve_eval_output_dir("/tmp/demo/best.pth", None, now=datetime(2026, 6, 22, 9, 8, 7))
 
-        self.assertEqual(resolved, Path("runs") / "eval" / "best_eval")
+        self.assertEqual(resolved, Path("runs") / "eval" / "eval_20260622090807")
 
     def test_evaluate_checkpoint_directory_writes_summary_and_report(self):
         with tempfile.TemporaryDirectory() as tmp:

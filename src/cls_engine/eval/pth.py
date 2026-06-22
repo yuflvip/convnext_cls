@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from pathlib import Path
 
 from cls_engine.predict.predictor import IMAGE_EXTS
@@ -64,10 +65,15 @@ def build_eval_dataset(
     return EvalImageDataset(samples=samples, class_names=class_names, transform=transform)
 
 
-def resolve_eval_output_dir(model_path: str | Path, output: str | Path | None) -> Path:
+def resolve_eval_output_dir(
+    model_path: str | Path,
+    output: str | Path | None,
+    now: datetime | None = None,
+) -> Path:
     if output:
         return Path(output)
-    return Path("runs") / "eval" / f"{Path(model_path).stem}_eval"
+    current = now or datetime.now()
+    return Path("runs") / "eval" / f"eval_{current.strftime('%Y%m%d%H%M%S')}"
 
 
 def _resolve_device(device: str) -> torch.device:

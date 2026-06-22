@@ -19,7 +19,7 @@ def build_arg_parser():
     )
     parser.add_argument("--model", type=str, required=True, help="待评估的模型权重路径。必填。")
     parser.add_argument("--data", type=str, required=True, help="验证集根目录。目录下应按类别分子目录。必填。")
-    parser.add_argument("--output", type=str, default=None, help="输出目录。可为空。默认: {model_stem}_eval")
+    parser.add_argument("--output", type=str, default=None, help="输出目录。可为空。默认: runs/eval/eval_YYYYMMDDHHmmss")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="评估设备。默认: %(default)s")
     parser.add_argument("--imgsz", type=str, default="224", help="输入尺寸。支持: 224 或 256,384。默认: %(default)s")
     parser.add_argument(
