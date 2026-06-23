@@ -20,7 +20,7 @@ def build_arg_parser():
     )
     parser.add_argument("--format", type=str, default="pth", choices=["pth", "onnx"], help="预测后端格式。默认: %(default)s")
     parser.add_argument("--model", type=str, required=True, help="待预测的模型权重路径。必填。")
-    parser.add_argument("--input", type=str, required=True, help="输入图片路径或目录。必填。")
+    parser.add_argument("--data", type=str, required=True, help="输入图片路径或目录。必填。")
     parser.add_argument("--output", type=str, default=None, help="输出目录。可为空。默认: runs/predict/predict_YYYYMMDDHHmmss")
     parser.add_argument("--classes", type=str, default=None, help="类别文件路径。ONNX 模式可为空，默认尝试读取模型同目录 classes.json")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="预测设备。默认: %(default)s")
@@ -48,7 +48,7 @@ def main(argv=None):
     if args.format == "pth":
         output_dir = predict_with_checkpoint(
             model_path=args.model,
-            input_path=args.input,
+            input_path=args.data,
             output=args.output,
             device=args.device,
             imgsz=args.imgsz,
@@ -59,7 +59,7 @@ def main(argv=None):
     else:
         output_dir = predict_with_onnx(
             model_path=args.model,
-            input_path=args.input,
+            input_path=args.data,
             output=args.output,
             device=args.device,
             imgsz=args.imgsz,
