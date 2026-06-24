@@ -20,8 +20,8 @@ data:
   augment_backend: gpu
 
 model:
-  # convnext_nano.in12k_ft_in1k / hgnetv2_b4.ssld_stage2_ft_in1k
-  name: convnext_nano.in12k_ft_in1k
+  # hgnetv2_b5.ssld_stage2_ft_in1k / convnext_nano.in12k_ft_in1k / hgnetv2_b4.ssld_stage2_ft_in1k
+  name: hgnetv2_b5.ssld_stage2_ft_in1k
   pretrained: true
   cache_dir: /mnt/sdb/cls_dataset_clean/pretrained_cache/huggingface/hub
 
