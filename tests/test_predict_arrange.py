@@ -16,7 +16,12 @@ if str(ROOT) not in sys.path:
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from cls_engine.predict.predictor import arrange_prediction_outputs, resolve_prediction_output_dir
+from cls_engine.predict.predictor import (
+    arrange_prediction_outputs,
+    cleanup_temporary_inputs,
+    prepare_prediction_inputs,
+    resolve_prediction_output_dir,
+)
 
 
 def _load_predict_parser():
@@ -149,12 +154,20 @@ class PredictArrangeTests(unittest.TestCase):
 
         self.assertEqual(resolved, Path("runs") / "predict" / "predict_20260621153010")
 
-    def test_predict_cli_accepts_arrange_mode(self):
+    def test_predict_cli_accepts_arrange_mode_with_data(self):
         parser = _load_predict_parser()()
 
-        args = parser.parse_args(["--model", "demo.pth", "--input", "/tmp/images", "--arrange_mode", "copy"])
+        args = parser.parse_args(["--model", "demo.pth", "--data", "/tmp/images", "--arrange_mode", "copy"])
 
         self.assertEqual(args.arrange_mode, "copy")
+        self.assertEqual(args.data, "/tmp/images")
+        self.assertEqual(args.temp_dir, "/tmp/predict_cls_url/")
+
+    def test_predict_cli_rejects_removed_input_argument(self):
+        parser = _load_predict_parser()()
+
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--model", "demo.pth", "--input", "/tmp/images"])
 
     def test_arrange_prediction_outputs_copy_copies_into_class_dirs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -225,6 +238,44 @@ class PredictArrangeTests(unittest.TestCase):
                 for line in printed_lines
             )
         )
+
+    def test_prepare_prediction_inputs_downloads_single_url_to_temp_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_dir = Path(tmp) / "predict_cls_url"
+
+            class FakeResponse:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+                def read(self):
+                    return b"remote-image"
+
+            with mock.patch("urllib.request.urlopen", return_value=FakeResponse()):
+                with mock.patch("cls_engine.predict.predictor.random.randint", return_value=123456):
+                    with mock.patch("cls_engine.predict.predictor.datetime") as mock_datetime:
+                        mock_datetime.now.return_value = datetime(2026, 6, 24, 13, 30, 10, 123000)
+                        input_paths, temp_paths = prepare_prediction_inputs(
+                            "https://example.com/a.jpg",
+                            temp_dir=temp_dir,
+                        )
+
+            self.assertEqual(len(input_paths), 1)
+            self.assertEqual(temp_paths, input_paths)
+            self.assertTrue(input_paths[0].exists())
+            self.assertEqual(input_paths[0].parent, temp_dir)
+            self.assertEqual(input_paths[0].name, "20260624133010123_123456.jpg")
+
+    def test_cleanup_temporary_inputs_removes_temp_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_file = Path(tmp) / "tmp.jpg"
+            temp_file.write_bytes(b"temp")
+
+            cleanup_temporary_inputs([temp_file], temp_dir=Path(tmp))
+
+            self.assertFalse(temp_file.exists())
 
 
 if __name__ == "__main__":

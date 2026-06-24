@@ -1,5 +1,7 @@
 import json
+import random
 import shutil
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from cls_engine.io.writers import write_csv, write_json
@@ -31,6 +33,44 @@ def collect_input_images(input_path: str | Path) -> list[Path]:
     if input_path.is_dir():
         return sorted(p for p in input_path.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTS)
     raise FileNotFoundError(f"Input path does not exist: {input_path}")
+
+
+def is_url_input(value: str | Path) -> bool:
+    text = str(value)
+    return text.startswith("http://") or text.startswith("https://")
+
+
+def _build_temp_download_path(temp_dir: str | Path, suffix: str = ".jpg", now: datetime | None = None) -> Path:
+    current = now or datetime.now()
+    millis = int(current.microsecond / 1000)
+    name = f"{current.strftime('%Y%m%d%H%M%S')}{millis:03d}_{random.randint(0, 999999):06d}{suffix}"
+    return Path(temp_dir) / name
+
+
+def prepare_prediction_inputs(data: str | Path, temp_dir: str | Path) -> tuple[list[Path], list[Path]]:
+    if not is_url_input(data):
+        return collect_input_images(data), []
+
+    suffix = Path(str(data)).suffix.lower()
+    if suffix not in IMAGE_EXTS:
+        suffix = ".jpg"
+    temp_path = _build_temp_download_path(temp_dir, suffix=suffix)
+    temp_path.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(str(data)) as response:
+        temp_path.write_bytes(response.read())
+    return [temp_path], [temp_path]
+
+
+def cleanup_temporary_inputs(temp_paths: list[Path], temp_dir: str | Path | None = None) -> None:
+    for path in temp_paths:
+        Path(path).unlink(missing_ok=True)
+    if temp_dir is not None:
+        temp_dir_path = Path(temp_dir)
+        try:
+            if temp_dir_path.is_dir() and not any(temp_dir_path.iterdir()):
+                temp_dir_path.rmdir()
+        except OSError:
+            pass
 
 
 def resolve_prediction_output_dir(
@@ -80,7 +120,7 @@ def arrange_prediction_outputs(output_dir: str | Path, rows: list[dict], arrange
 
     output_dir = Path(output_dir)
     for row in rows:
-        source = Path(row["path"])
+        source = Path(row.get("local_path", row["path"]))
         target = output_dir / str(row["pred_name"]) / source.name
         target.parent.mkdir(parents=True, exist_ok=True)
         if arrange_mode == "copy":

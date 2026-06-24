@@ -12,8 +12,10 @@ from cls_engine.models.factory import build_model
 
 from .predictor import (
     arrange_prediction_outputs,
-    collect_input_images,
+    cleanup_temporary_inputs,
+    is_url_input,
     parse_predict_imgsz,
+    prepare_prediction_inputs,
     print_prediction_progress,
     resolve_prediction_output_dir,
     write_prediction_outputs,
@@ -45,10 +47,11 @@ def predict_with_checkpoint(
     preprocess: str = "letterbox",
     topk: int = 3,
     arrange_mode: str | None = None,
+    temp_dir: str | Path = "/tmp/predict_cls_url/",
 ) -> Path:
     info = load_predict_checkpoint_info(model_path)
     input_size = parse_predict_imgsz(imgsz)
-    image_paths = collect_input_images(input_path)
+    image_paths, temp_paths = prepare_prediction_inputs(input_path, temp_dir=temp_dir)
     if not image_paths:
         raise FileNotFoundError(f"No images found under: {input_path}")
 
@@ -60,28 +63,33 @@ def predict_with_checkpoint(
     transform = build_eval_transform(input_size, augment_backend="cpu", preprocess=preprocess)
     rows: list[dict[str, Any]] = []
     effective_topk = max(1, min(topk, info["num_classes"]))
+    source_is_url = is_url_input(input_path)
 
-    with torch.no_grad():
-        total_images = len(image_paths)
-        for index, path in enumerate(image_paths, start=1):
-            image = Image.open(path).convert("RGB")
-            x = transform(image).unsqueeze(0).to(torch_device)
-            logits = model(x)
-            probs = torch.softmax(logits, dim=1)[0]
-            conf, pred = probs.max(dim=0)
-            values, indices = probs.topk(effective_topk)
-            topk_rows = [[info["classes"][int(idx)], float(val)] for val, idx in zip(values.cpu().tolist(), indices.cpu().tolist())]
-            row = {
-                "path": str(path),
-                "pred_idx": int(pred.item()),
-                "pred_name": info["classes"][int(pred.item())],
-                "conf": float(conf.item()),
-                "topk": topk_rows,
-            }
-            rows.append(row)
-            print_prediction_progress(index, total_images, row)
+    try:
+        with torch.no_grad():
+            total_images = len(image_paths)
+            for index, path in enumerate(image_paths, start=1):
+                image = Image.open(path).convert("RGB")
+                x = transform(image).unsqueeze(0).to(torch_device)
+                logits = model(x)
+                probs = torch.softmax(logits, dim=1)[0]
+                conf, pred = probs.max(dim=0)
+                values, indices = probs.topk(effective_topk)
+                topk_rows = [[info["classes"][int(idx)], float(val)] for val, idx in zip(values.cpu().tolist(), indices.cpu().tolist())]
+                row = {
+                    "path": str(input_path) if source_is_url else str(path),
+                    "local_path": str(path),
+                    "pred_idx": int(pred.item()),
+                    "pred_name": info["classes"][int(pred.item())],
+                    "conf": float(conf.item()),
+                    "topk": topk_rows,
+                }
+                rows.append(row)
+                print_prediction_progress(index, total_images, row)
 
-    output_dir = resolve_prediction_output_dir(model_path, output)
-    write_prediction_outputs(output_dir, rows)
-    arrange_prediction_outputs(output_dir, rows, arrange_mode=arrange_mode)
-    return output_dir
+        output_dir = resolve_prediction_output_dir(model_path, output)
+        write_prediction_outputs(output_dir, rows)
+        arrange_prediction_outputs(output_dir, rows, arrange_mode=arrange_mode)
+        return output_dir
+    finally:
+        cleanup_temporary_inputs(temp_paths, temp_dir=temp_dir)

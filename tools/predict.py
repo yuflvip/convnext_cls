@@ -25,6 +25,7 @@ def build_arg_parser():
     parser.add_argument("--classes", type=str, default=None, help="类别文件路径。ONNX 模式可为空，默认尝试读取模型同目录 classes.json")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"], help="预测设备。默认: %(default)s")
     parser.add_argument("--imgsz", type=str, default="224", help="输入尺寸。支持: 224 或 256,384。默认: %(default)s")
+    parser.add_argument("--temp_dir", type=str, default="/tmp/predict_cls_url/", help="网络图片下载临时目录。默认: %(default)s")
     parser.add_argument(
         "--preprocess",
         type=str,
@@ -52,6 +53,7 @@ def main(argv=None):
             output=args.output,
             device=args.device,
             imgsz=args.imgsz,
+            temp_dir=args.temp_dir,
             preprocess=args.preprocess,
             topk=args.topk,
             arrange_mode=args.arrange_mode,
@@ -63,6 +65,7 @@ def main(argv=None):
             output=args.output,
             device=args.device,
             imgsz=args.imgsz,
+            temp_dir=args.temp_dir,
             preprocess=args.preprocess,
             topk=args.topk,
             classes_path=args.classes,
