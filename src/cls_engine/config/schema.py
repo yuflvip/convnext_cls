@@ -34,6 +34,7 @@ class ModelConfig:
 @dataclass
 class TrainSettings:
     epochs: int = 30
+    patience: int = 50
     batch_size: int = 16
     lr: float = 3e-4
     weight_decay: float = 0.05
@@ -81,6 +82,8 @@ class TrainConfig:
             raise ValueError("val_ratio + test_ratio must be less than 1")
         if self.train.class_weight_mode not in {"inv", "inv_sqrt"}:
             raise ValueError("class_weight_mode must be 'inv' or 'inv_sqrt'")
+        if self.train.patience < 0:
+            raise ValueError("train.patience must be >= 0")
         if self.data.preprocess not in {"crop", "letterbox", "stretch"}:
             raise ValueError("preprocess must be 'crop', 'letterbox', or 'stretch'")
         if self.data.augment_backend not in {"cpu", "gpu"}:

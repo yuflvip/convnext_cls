@@ -99,6 +99,22 @@ def _print_startup_stage(message: str) -> None:
     print(f"[Startup] {message}")
 
 
+def _update_early_stop_state(
+    epoch: int,
+    val_acc_top1: float,
+    best_val_acc: float,
+    best_epoch: int,
+    patience: int,
+) -> tuple[bool, float, int, int, bool]:
+    is_best_epoch = val_acc_top1 > best_val_acc
+    if is_best_epoch:
+        best_val_acc = val_acc_top1
+        best_epoch = epoch
+    stale_epochs = epoch - best_epoch
+    should_stop_early = patience > 0 and stale_epochs >= patience
+    return is_best_epoch, best_val_acc, best_epoch, stale_epochs, should_stop_early
+
+
 def _write_initial_artifacts(writer: ArtifactWriter, cfg: TrainConfig, data: PreparedData, port_info: dict) -> None:
     writer.write_classes(data.class_names)
     writer.write_run_config({
@@ -206,6 +222,9 @@ def run_training(cfg: TrainConfig) -> None:
         scaler = amp.GradScaler(enabled=(device.type == "cuda" and cfg.train.amp))
         criterion = nn.CrossEntropyLoss(weight=class_weights)
         best_val_acc = -1.0
+        best_epoch = 0
+        early_stopped = False
+        stopped_epoch = cfg.train.epochs
         test_acc = None
         test_loss = None
 
@@ -242,6 +261,14 @@ def run_training(cfg: TrainConfig) -> None:
             val_loss = eval_out["val_loss"]
             val_acc_top1 = eval_out["val_acc_top1"]
             val_acc_top5 = eval_out["val_acc_top5"]
+            is_best_epoch, best_val_acc, best_epoch, stale_epochs, should_stop_early = _update_early_stop_state(
+                epoch=epoch,
+                val_acc_top1=val_acc_top1,
+                best_val_acc=best_val_acc,
+                best_epoch=best_epoch,
+                patience=cfg.train.patience,
+            )
+            early_stop_enabled = cfg.train.patience > 0
 
             if is_main_process():
                 lr_now = optimizer.param_groups[0]["lr"]
@@ -251,8 +278,7 @@ def run_training(cfg: TrainConfig) -> None:
                     f"val_loss={val_loss:.4f} val_acc_top1={val_acc_top1:.4f} "
                     f"val_acc_top5={val_acc_top5:.4f} | lr={lr_now:.6g} time={train_time:.1f}s"
                 )
-                if val_acc_top1 > best_val_acc:
-                    best_val_acc = val_acc_top1
+                if is_best_epoch:
                     save_best_checkpoint(
                         out_dir / "best.pth",
                         model,
@@ -264,6 +290,8 @@ def run_training(cfg: TrainConfig) -> None:
                         val_loss,
                     )
                     print(f"Saved best checkpoint: val_acc={best_val_acc:.4f}")
+                elif early_stop_enabled:
+                    print(f"[EarlyStop] no val_acc_top1 improvement for {stale_epochs}/{cfg.train.patience} epochs")
                 save_last_checkpoint(out_dir / "last.pth", model, epoch, data.class_names)
                 write_eval_artifacts(writer, "val", eval_out, data.class_names, cfg.eval.print_top_wrong)
                 writer.append_epoch_result(
@@ -281,6 +309,17 @@ def run_training(cfg: TrainConfig) -> None:
                     RESULTS_CSV_HEADER,
                     first_epoch=(epoch == 1),
                 )
+                if should_stop_early:
+                    print(
+                        f"[EarlyStop] triggered at epoch {epoch} | "
+                        f"best val_acc_top1={best_val_acc:.4f} at epoch {best_epoch} | "
+                        f"patience={cfg.train.patience}"
+                    )
+
+            if should_stop_early:
+                early_stopped = True
+                stopped_epoch = epoch
+                break
 
         if data.test_loader is not None:
             if is_dist_avail_and_initialized():
@@ -302,6 +341,10 @@ def run_training(cfg: TrainConfig) -> None:
         if is_main_process():
             writer.write_final_summary({
                 "best_val_acc": best_val_acc,
+                "best_epoch": best_epoch,
+                "early_stopped": early_stopped,
+                "stopped_epoch": stopped_epoch,
+                "patience": cfg.train.patience,
                 "test_acc": test_acc,
                 "test_loss": test_loss,
                 "num_classes": data.num_classes,

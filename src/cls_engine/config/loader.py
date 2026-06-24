@@ -75,6 +75,7 @@ def load_train_config(path: str | Path, args: object | None = None) -> TrainConf
             cfg.task.exist_ok = bool(getattr(args, "exist_ok"))
         _set_if_present(cfg.model, "name", getattr(args, "model", None))
         _set_if_present(cfg.train, "epochs", getattr(args, "epochs", None))
+        _set_if_present(cfg.train, "patience", getattr(args, "patience", None))
         _set_if_present(cfg.train, "batch_size", getattr(args, "batch", None))
         _set_if_present(cfg.data, "num_workers", getattr(args, "workers", None))
         _set_if_present(cfg.data, "preprocess", getattr(args, "preprocess", None))

@@ -51,6 +51,7 @@ def build_arg_parser():
     )
     parser.add_argument("--model", type=str, default=None, help="模型名称。可为空。默认: 取配置文件 model.name")
     parser.add_argument("--epochs", type=int, default=None, help="训练轮数。可为空。默认: 取配置文件 train.epochs")
+    parser.add_argument("--patience", type=int, default=None, help="早停耐心轮数。可为空。默认: 取配置文件 train.patience")
     parser.add_argument("--batch", type=int, default=None, help="batch size。可为空。默认: 取配置文件 train.batch_size")
     parser.add_argument("--workers", type=int, default=None, help="DataLoader worker 数。可为空。默认: 取配置文件 data.num_workers")
     parser.add_argument(

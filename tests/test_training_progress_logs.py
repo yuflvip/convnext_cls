@@ -10,6 +10,10 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from cls_engine.config.loader import load_train_config
 
 
 def _load_module(module_name: str, path: Path, stub_modules: dict[str, object]):
@@ -30,6 +34,10 @@ def _load_module(module_name: str, path: Path, stub_modules: dict[str, object]):
 
 
 class TrainingProgressLogTests(unittest.TestCase):
+    def test_train_config_defaults_patience_to_50(self):
+        cfg = load_train_config(ROOT / "configs" / "convnext_train.yaml")
+        self.assertEqual(cfg.train.patience, 50)
+
     def test_prepare_data_emits_stage_logs(self):
         fake_torch_utils_data = types.ModuleType("torch.utils.data")
 
@@ -208,6 +216,61 @@ class TrainingProgressLogTests(unittest.TestCase):
             fake_module._print_startup_stage("preparing data...")
 
         self.assertEqual(output.getvalue().strip(), "[Startup] preparing data...")
+
+    def test_update_early_stop_state_matches_patience_behavior(self):
+        fake_torch = types.ModuleType("torch")
+        fake_torch.amp = types.SimpleNamespace()
+        fake_torch_nn = types.ModuleType("torch.nn")
+        fake_module = _load_module(
+            "cls_engine.engine.trainer_earlystop_test",
+            SRC / "cls_engine" / "engine" / "trainer.py",
+            {
+                "torch": fake_torch,
+                "torch.nn": fake_torch_nn,
+                "cls_engine.config.schema": types.SimpleNamespace(TrainConfig=object),
+                "cls_engine.data.datamodule": types.SimpleNamespace(PreparedData=object, prepare_data=lambda *args, **kwargs: None),
+                "cls_engine.data.dataset": types.SimpleNamespace(parse_data_roots=lambda root: [root]),
+                "cls_engine.data.splits": types.SimpleNamespace(build_class_weights=lambda *args, **kwargs: None),
+                "cls_engine.data.transforms": types.SimpleNamespace(build_gpu_eval_batch_augment=lambda *args, **kwargs: None, build_gpu_train_batch_augment=lambda *args, **kwargs: None),
+                "cls_engine.distributed.ddp": types.SimpleNamespace(barrier=lambda: None, cleanup_distributed=lambda: None, get_rank=lambda: 0, is_dist_avail_and_initialized=lambda: False, is_main_process=lambda: True, setup_distributed=lambda backend: None),
+                "cls_engine.distributed.device": types.SimpleNamespace(apply_device_spec=lambda spec: None, configure_torch_backend=lambda device: None, parse_device_spec=lambda device: None, resolve_device=lambda device: None, validate_multi_gpu_launch=lambda spec: None),
+                "cls_engine.distributed.port": types.SimpleNamespace(PortConfig=object, resolve_master_port=lambda *args, **kwargs: (None, {})),
+                "cls_engine.engine.evaluator": types.SimpleNamespace(write_eval_artifacts=lambda *args, **kwargs: None),
+                "cls_engine.engine.loops": types.SimpleNamespace(evaluate_with_details=lambda *args, **kwargs: {}, train_one_epoch=lambda *args, **kwargs: (0, 0, 0, 0)),
+                "cls_engine.io.artifacts": types.SimpleNamespace(ArtifactWriter=object),
+                "cls_engine.models.checkpoint": types.SimpleNamespace(load_checkpoint=lambda *args, **kwargs: {}, save_best_checkpoint=lambda *args, **kwargs: None, save_last_checkpoint=lambda *args, **kwargs: None, unwrap_model=lambda model: model),
+                "cls_engine.models.factory": types.SimpleNamespace(build_model=lambda *args, **kwargs: None),
+                "cls_engine.utils.paths": types.SimpleNamespace(ensure_dir=lambda path: path, resolve_output_dir=lambda **kwargs: (Path("runs/x"), "exp")),
+                "cls_engine.utils.seed": types.SimpleNamespace(set_seed=lambda seed: None),
+            },
+        )
+
+        is_best, best_acc, best_epoch, stale_epochs, should_stop = fake_module._update_early_stop_state(
+            epoch=1,
+            val_acc_top1=0.80,
+            best_val_acc=-1.0,
+            best_epoch=0,
+            patience=2,
+        )
+        self.assertEqual((is_best, best_acc, best_epoch, stale_epochs, should_stop), (True, 0.80, 1, 0, False))
+
+        is_best, best_acc, best_epoch, stale_epochs, should_stop = fake_module._update_early_stop_state(
+            epoch=2,
+            val_acc_top1=0.79,
+            best_val_acc=best_acc,
+            best_epoch=best_epoch,
+            patience=2,
+        )
+        self.assertEqual((is_best, best_acc, best_epoch, stale_epochs, should_stop), (False, 0.80, 1, 1, False))
+
+        is_best, best_acc, best_epoch, stale_epochs, should_stop = fake_module._update_early_stop_state(
+            epoch=3,
+            val_acc_top1=0.78,
+            best_val_acc=best_acc,
+            best_epoch=best_epoch,
+            patience=2,
+        )
+        self.assertEqual((is_best, best_acc, best_epoch, stale_epochs, should_stop), (False, 0.80, 1, 2, True))
 
 
 if __name__ == "__main__":
