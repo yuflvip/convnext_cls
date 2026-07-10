@@ -143,5 +143,5 @@ distributed:
   port_range_end: 65000
 
 eval:
-  print_top_wrong: 50
+  print_top_wrong: 20
   save_predictions: true
