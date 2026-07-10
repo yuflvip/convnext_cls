@@ -4,10 +4,18 @@ from pathlib import Path
 from typing import Any
 
 from .schema import (
+    AffineAugmentConfig,
+    AugmentConfig,
+    BlurAugmentConfig,
+    ColorJitterAugmentConfig,
     DataConfig,
     DistributedConfig,
+    ErasingAugmentConfig,
     EvalConfig,
+    FlipAugmentConfig,
+    JpegAugmentConfig,
     ModelConfig,
+    ResizedCropAugmentConfig,
     TaskConfig,
     TrainConfig,
     TrainSettings,
@@ -46,6 +54,28 @@ def _has_nonempty_value(value: Any) -> bool:
     return True
 
 
+def _build_augment_config(payload: dict[str, Any] | None) -> AugmentConfig:
+    payload = dict(payload or {})
+    return AugmentConfig(
+        enabled=payload.get("enabled", True),
+        flip=_build_dataclass(FlipAugmentConfig, payload.get("flip", {})),
+        color_jitter=_build_dataclass(ColorJitterAugmentConfig, payload.get("color_jitter", {})),
+        blur=_build_dataclass(BlurAugmentConfig, payload.get("blur", {})),
+        erasing=_build_dataclass(ErasingAugmentConfig, payload.get("erasing", {})),
+        affine=_build_dataclass(AffineAugmentConfig, payload.get("affine", {})),
+        resized_crop=_build_dataclass(ResizedCropAugmentConfig, payload.get("resized_crop", {})),
+        jpeg=_build_dataclass(JpegAugmentConfig, payload.get("jpeg", {})),
+    )
+
+
+def _build_data_config(payload: dict[str, Any]) -> DataConfig:
+    payload = dict(payload)
+    augment_raw = payload.pop("augment", {})
+    cfg = _build_dataclass(DataConfig, payload)
+    cfg.augment = _build_augment_config(augment_raw)
+    return cfg
+
+
 def load_train_config(path: str | Path, args: object | None = None) -> TrainConfig:
     raw = _read_config(Path(path))
     task_raw = dict(raw.get("task", {}))
@@ -56,7 +86,7 @@ def load_train_config(path: str | Path, args: object | None = None) -> TrainConf
         task_raw["output_explicit"] = _has_nonempty_value(task_raw["output"])
     cfg = TrainConfig(
         task=_build_dataclass(TaskConfig, task_raw),
-        data=_build_dataclass(DataConfig, raw.get("data", {})),
+        data=_build_data_config(raw.get("data", {})),
         model=_build_dataclass(ModelConfig, raw.get("model", {})),
         train=_build_dataclass(TrainSettings, raw.get("train", {})),
         distributed=_build_dataclass(DistributedConfig, raw.get("distributed", {})),

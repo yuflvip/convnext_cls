@@ -85,14 +85,24 @@ def _dataset_layout_payload(data: PreparedData) -> dict:
     }
 
 
-def _print_dataset_summary(data: PreparedData) -> None:
-    print("Dataset roots:")
+def _print_dataset_summary(data: PreparedData, cfg: TrainConfig) -> None:
+    if data.layout.mode == "explicit_splits":
+        print(
+            f"[Data] 使用显式数据划分 "
+            f"(explicit_val={data.layout.has_explicit_val}, explicit_test={data.layout.has_explicit_test})"
+        )
+    else:
+        print(
+            f"[Data] 使用自动分层切分 "
+            f"(val_ratio={cfg.data.val_ratio:.4f}, test_ratio={cfg.data.test_ratio:.4f})"
+        )
+    print("[Data] 数据集样本统计:")
     for root in data.layout.data_roots:
-        print(f"  train {root}: {data.train_root_counts.get(str(root), 0)} samples")
+        print(f"  训练集 {root}: {data.train_root_counts.get(str(root), 0)} samples")
         if data.layout.has_explicit_val:
-            print(f"  val   {root}: {data.val_root_counts.get(str(root), 0)} samples")
+            print(f"  验证集 {root}: {data.val_root_counts.get(str(root), 0)} samples")
         if data.layout.has_explicit_test:
-            print(f"  test  {root}: {data.test_root_counts.get(str(root), 0)} samples")
+            print(f"  测试集 {root}: {data.test_root_counts.get(str(root), 0)} samples")
 
 
 def _print_startup_stage(message: str) -> None:
@@ -190,7 +200,7 @@ def run_training(cfg: TrainConfig) -> None:
         writer = ArtifactWriter(out_dir) if is_main_process() else None
         if is_main_process():
             _print_startup_stage(f"data prepared in {data_elapsed:.1f}s")
-            _print_dataset_summary(data)
+            _print_dataset_summary(data, cfg)
             _write_initial_artifacts(writer, cfg, data, port_info)
 
         train_batch_transform = None
@@ -198,8 +208,16 @@ def run_training(cfg: TrainConfig) -> None:
         if is_main_process():
             _print_startup_stage("building model...")
         if cfg.data.augment_backend == "gpu":
-            train_batch_transform = build_gpu_train_batch_augment(cfg.data.img_size, preprocess=cfg.data.preprocess).to(device)
-            eval_batch_transform = build_gpu_eval_batch_augment(cfg.data.img_size, preprocess=cfg.data.preprocess).to(device)
+            train_batch_transform = build_gpu_train_batch_augment(
+                cfg.data.img_size,
+                preprocess=cfg.data.preprocess,
+                augment=cfg.data.augment,
+            ).to(device)
+            eval_batch_transform = build_gpu_eval_batch_augment(
+                cfg.data.img_size,
+                preprocess=cfg.data.preprocess,
+                augment=cfg.data.augment,
+            ).to(device)
 
         class_weights = build_class_weights(data.train_counts, mode=cfg.train.class_weight_mode).to(device)
         model = build_model(

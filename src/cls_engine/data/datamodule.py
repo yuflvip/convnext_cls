@@ -85,8 +85,18 @@ def _build_split_dataset(
 
 
 def prepare_data(cfg: DataConfig, seed: int, batch_size: int, progress_logger=None) -> PreparedData:
-    train_tf = build_train_transform(cfg.img_size, augment_backend=cfg.augment_backend, preprocess=cfg.preprocess)
-    val_tf = build_eval_transform(cfg.img_size, augment_backend=cfg.augment_backend, preprocess=cfg.preprocess)
+    train_tf = build_train_transform(
+        cfg.img_size,
+        augment_backend=cfg.augment_backend,
+        preprocess=cfg.preprocess,
+        augment=cfg.augment,
+    )
+    val_tf = build_eval_transform(
+        cfg.img_size,
+        augment_backend=cfg.augment_backend,
+        preprocess=cfg.preprocess,
+        augment=cfg.augment,
+    )
     _emit_progress(progress_logger, "[Data] discovering dataset layout...")
     layout = discover_dataset_layout(parse_data_roots(cfg.root))
     class_names = layout.class_names

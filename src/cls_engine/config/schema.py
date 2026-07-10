@@ -4,6 +4,80 @@ from typing import Any
 
 
 @dataclass
+class FlipAugmentConfig:
+    enabled: bool = True
+    p: float = 0.5
+
+
+@dataclass
+class ColorJitterAugmentConfig:
+    enabled: bool = True
+    p: float = 1.0
+    brightness: float = 0.2
+    contrast: float = 0.2
+    saturation: float = 0.2
+    hue: float = 0.02
+
+
+@dataclass
+class BlurAugmentConfig:
+    enabled: bool = False
+    p: float = 0.1
+    kernel_size: int = 3
+    sigma_min: float = 0.1
+    sigma_max: float = 1.0
+
+
+@dataclass
+class ErasingAugmentConfig:
+    enabled: bool = False
+    p: float = 0.1
+    scale_min: float = 0.02
+    scale_max: float = 0.12
+    ratio_min: float = 0.3
+    ratio_max: float = 3.3
+    value: float = 0.0
+
+
+@dataclass
+class AffineAugmentConfig:
+    enabled: bool = False
+    p: float = 0.1
+    degrees: float = 5.0
+    translate: float = 0.05
+    scale_min: float = 0.95
+    scale_max: float = 1.05
+
+
+@dataclass
+class ResizedCropAugmentConfig:
+    enabled: bool = False
+    p: float = 1.0
+    scale_min: float = 0.8
+    scale_max: float = 1.0
+
+
+@dataclass
+class JpegAugmentConfig:
+    enabled: bool = False
+    p: float = 0.1
+    quality_min: int = 60
+    quality_max: int = 95
+
+
+@dataclass
+class AugmentConfig:
+    enabled: bool = True
+    flip: FlipAugmentConfig = field(default_factory=FlipAugmentConfig)
+    color_jitter: ColorJitterAugmentConfig = field(default_factory=ColorJitterAugmentConfig)
+    blur: BlurAugmentConfig = field(default_factory=BlurAugmentConfig)
+    erasing: ErasingAugmentConfig = field(default_factory=ErasingAugmentConfig)
+    affine: AffineAugmentConfig = field(default_factory=AffineAugmentConfig)
+    resized_crop: ResizedCropAugmentConfig = field(default_factory=ResizedCropAugmentConfig)
+    jpeg: JpegAugmentConfig = field(default_factory=JpegAugmentConfig)
+
+
+@dataclass
 class TaskConfig:
     project: str = "default"
     name: str = ""
@@ -22,6 +96,7 @@ class DataConfig:
     num_workers: int = 8
     preprocess: str = "letterbox"
     augment_backend: str = "cpu"
+    augment: AugmentConfig = field(default_factory=AugmentConfig)
 
 
 @dataclass
@@ -88,6 +163,7 @@ class TrainConfig:
             raise ValueError("preprocess must be 'crop', 'letterbox', or 'stretch'")
         if self.data.augment_backend not in {"cpu", "gpu"}:
             raise ValueError("augment_backend must be 'cpu' or 'gpu'")
+        _validate_augment_config(self.data.augment)
         if self.distributed.backend not in {"nccl", "gloo"}:
             raise ValueError("distributed backend must be 'nccl' or 'gloo'")
         if not is_valid_device_spec(self.device):
@@ -118,3 +194,41 @@ def is_valid_device_spec(value: str) -> bool:
     if value in {"auto", "cpu", "cuda"}:
         return True
     return re.fullmatch(r"\d+(,\d+)*", value or "") is not None
+
+
+def _validate_probability(name: str, value: float) -> None:
+    if not (0.0 <= value <= 1.0):
+        raise ValueError(f"{name} must be in [0, 1], got {value}")
+
+
+def _validate_augment_config(cfg: AugmentConfig) -> None:
+    _validate_probability("augment.flip.p", cfg.flip.p)
+    _validate_probability("augment.color_jitter.p", cfg.color_jitter.p)
+    _validate_probability("augment.blur.p", cfg.blur.p)
+    _validate_probability("augment.erasing.p", cfg.erasing.p)
+    _validate_probability("augment.affine.p", cfg.affine.p)
+    _validate_probability("augment.resized_crop.p", cfg.resized_crop.p)
+    _validate_probability("augment.jpeg.p", cfg.jpeg.p)
+
+    if cfg.blur.kernel_size <= 0 or cfg.blur.kernel_size % 2 == 0:
+        raise ValueError("augment.blur.kernel_size must be a positive odd integer")
+    if cfg.blur.sigma_min > cfg.blur.sigma_max:
+        raise ValueError("augment.blur.sigma_min must be <= sigma_max")
+
+    if cfg.erasing.scale_min > cfg.erasing.scale_max:
+        raise ValueError("augment.erasing.scale_min must be <= scale_max")
+    if cfg.erasing.ratio_min > cfg.erasing.ratio_max:
+        raise ValueError("augment.erasing.ratio_min must be <= ratio_max")
+
+    if cfg.affine.degrees < 0:
+        raise ValueError("augment.affine.degrees must be >= 0")
+    if not (0.0 <= cfg.affine.translate < 1.0):
+        raise ValueError("augment.affine.translate must be in [0, 1)")
+    if cfg.affine.scale_min > cfg.affine.scale_max:
+        raise ValueError("augment.affine.scale_min must be <= scale_max")
+
+    if cfg.resized_crop.scale_min > cfg.resized_crop.scale_max:
+        raise ValueError("augment.resized_crop.scale_min must be <= scale_max")
+
+    if cfg.jpeg.quality_min > cfg.jpeg.quality_max:
+        raise ValueError("augment.jpeg.quality_min must be <= quality_max")

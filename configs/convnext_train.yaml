@@ -16,8 +16,110 @@ data:
   val_ratio: 0.1
   test_ratio: 0.1
   num_workers: 8
+  # 输入几何预处理方式：
+  # stretch: 直接拉伸到目标尺寸，不保留原始宽高比
+  # letterbox: 等比缩放后补边到目标尺寸，保留原始宽高比
+  # crop: 先缩放到稍大尺寸，再做中心裁剪；训练时若 augment.resized_crop.enabled=true，则改为随机裁剪增强
   preprocess: stretch
+  # 数据增强执行后端：
+  # cpu: 使用 torchvision 的 CPU 变换，增强能力最完整，适合调试和精细控制
+  # gpu: 使用 Kornia 的 GPU batch 增强，吞吐更高，但当前不支持 jpeg 增强
   augment_backend: gpu
+  augment:
+    # 是否启用训练增强总开关。
+    # false 时，下面各增强项即使 enabled=true 也不会生效。
+    enabled: true
+    flip:
+      # 是否启用水平翻转。
+      # 对车辆正反方向不敏感的分类任务通常有帮助。
+      enabled: true
+      # 水平翻转概率，范围 [0, 1]。
+      # 0.5 表示约一半样本会被翻转。
+      p: 0.5
+    color_jitter:
+      # 是否启用亮度、对比度、饱和度、色相扰动。
+      # 适合提升不同光照和摄像头条件下的泛化能力。
+      enabled: true
+      # 整体颜色扰动生效概率，范围 [0, 1]。
+      # 1.0 表示每张图都会执行一次 ColorJitter。
+      p: 0.7
+      # 亮度扰动强度。值越大，亮暗变化越明显。0.2
+      brightness: 0.25
+      # 对比度扰动强度。值越大，明暗层次变化越明显。0.2
+      contrast: 0.25
+      # 饱和度扰动强度。值越大，颜色浓淡变化越明显。0.2
+      saturation: 0.25
+      # 色相扰动强度。通常保持较小，过大容易破坏真实颜色分布。0.02
+      hue: 0.05
+    blur:
+      # 是否启用高斯模糊增强。
+      # 适合模拟轻微失焦、低清晰度或采集抖动场景。
+      enabled: true
+      # 高斯模糊生效概率，范围 [0, 1]。
+      p: 0.1
+      # 高斯核大小，必须是正奇数，例如 3、5、7。
+      # 值越大，模糊越明显。
+      kernel_size: 3
+      # 高斯模糊 sigma 下界。
+      sigma_min: 0.1
+      # 高斯模糊 sigma 上界。需 >= sigma_min。
+      sigma_max: 1.0
+    erasing:
+      # 是否启用随机擦除。
+      # 适合模拟局部遮挡，但对依赖局部结构的任务要谨慎。
+      enabled: true
+      # 随机擦除生效概率，范围 [0, 1]。
+      p: 0.1
+      # 擦除区域面积占整图面积的下界。
+      scale_min: 0.02
+      # 擦除区域面积占整图面积的上界。需 >= scale_min。
+      scale_max: 0.12
+      # 擦除区域宽高比下界。
+      ratio_min: 0.3
+      # 擦除区域宽高比上界。需 >= ratio_min。
+      ratio_max: 3.3
+      # 擦除区域填充值。
+      # 0.0 表示填黑；若后续想模拟随机噪声，可再扩展其他模式。
+      value: 0.0
+    affine:
+      # 是否启用轻量仿射增强。
+      # 适合模拟轻微视角变化、抖动和平移，不建议设置过大。
+      enabled: true
+      # 仿射增强生效概率，范围 [0, 1]。
+      p: 0.1
+      # 最大旋转角度，单位为度。实际会在 [-degrees, degrees] 内采样。
+      degrees: 10.0
+      # 平移比例，取值范围 [0, 1)。
+      # 0.05 表示最多平移到图像宽/高的 5%。
+      translate: 0.05
+      # 缩放比例下界。0.95
+      scale_min: 0.8
+      # 缩放比例上界。需 >= scale_min。1.05
+      scale_max: 1.20
+    resized_crop:
+      # 是否启用随机裁剪缩放增强。
+      # 该增强只在 preprocess=crop 时生效。
+      # 打开后，训练会使用随机裁剪替代固定中心裁剪。
+      enabled: false
+      # 随机裁剪生效概率，范围 [0, 1]。
+      # 一般保持 1.0，表示启用后每张图都走随机裁剪。
+      p: 1.0
+      # 随机裁剪保留面积比例下界。
+      # 值越小，裁得越狠，尺度扰动越强。
+      scale_min: 0.8
+      # 随机裁剪保留面积比例上界。需 >= scale_min。
+      scale_max: 1.0
+    jpeg:
+      # 是否启用 JPEG 压缩增强。
+      # 适合模拟监控、抓拍、转码等造成的压缩失真。
+      # 当前仅支持 augment_backend=cpu；gpu 路径若开启会直接报错。
+      enabled: false
+      # JPEG 压缩增强生效概率，范围 [0, 1]。
+      p: 0.1
+      # JPEG 质量下界，值越小压缩越重、失真越明显。
+      quality_min: 60
+      # JPEG 质量上界。需 >= quality_min。
+      quality_max: 95
 
 model:
   # hgnetv2_b5.ssld_stage2_ft_in1k / convnext_nano.in12k_ft_in1k / hgnetv2_b4.ssld_stage2_ft_in1k
@@ -26,10 +128,10 @@ model:
   cache_dir: /mnt/sdb/cls_dataset_clean/pretrained_cache/huggingface/hub
 
 train:
-  epochs: 200
+  epochs: 300
   patience: 50
   batch_size: 64
-  lr: 0.0003
+  lr: 0.0001
   weight_decay: 0.05
   class_weight_mode: inv_sqrt
   amp: true
