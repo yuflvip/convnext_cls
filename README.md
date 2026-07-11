@@ -9,7 +9,7 @@ The first implemented command is `tools/train.py`. `tools/export.py` and
 
 ```bash
 python tools/train.py \
-  --config configs/convnext_train.yaml \
+  --config configs/cls_default.yaml \
   --data /path/to/dataset \
   --project vehicle_cls \
   --name baseline \
@@ -51,6 +51,25 @@ When multiple dataset roots are provided:
 - `val/` and `test/` must be consistent across roots: either every root has the
   split or none of them do
 
+## Config Inheritance
+
+`configs/cls_default.yaml` can be used as the default base config. Custom
+model configs can inherit from it with `_base_`, and child values override the
+parent while unspecified fields continue to use the parent values.
+
+```yaml
+_base_: cls_default.yaml
+
+model:
+  name: hgnetv2_b4.ssld_stage2_ft_in1k
+
+train:
+  batch_size: 64
+  lr: 0.0001
+```
+
+The final priority order is: base config < child config < CLI arguments.
+
 ## DDP
 
 For external `torchrun`, pass an explicit master port when running several jobs
@@ -58,7 +77,7 @@ on the same machine:
 
 ```bash
 torchrun --nproc_per_node=2 --master_port=29611 tools/train.py \
-  --config configs/convnext_train.yaml \
+  --config configs/cls_default.yaml \
   --data /path/to/dataset \
   --project vehicle_cls \
   --name ddp_run
