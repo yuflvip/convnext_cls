@@ -1,0 +1,7 @@
+_base_: cls_default.yaml
+
+task:
+  project: gongchengche_cls
+
+model:
+  name: hgnetv2_b5.ssld_stage2_ft_in1k
