@@ -27,7 +27,7 @@ def build_arg_parser():
     parser.add_argument(
         "--config",
         type=str,
-        default=str(ROOT / "configs" / "convnext_train.yaml"),
+        default=str(ROOT / "configs" / "cls_default.yaml"),
         help="配置文件路径。可为空。默认: %(default)s",
     )
     parser.add_argument("--data", type=str, required=True, help="训练数据集根目录。必填。")
