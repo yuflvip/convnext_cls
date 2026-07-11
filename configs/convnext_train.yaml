@@ -130,9 +130,9 @@ model:
 train:
   epochs: 200
   patience: 40
-  batch_size: 64
+  batch_size: 32
   lr: 0.0001
-  weight_decay: 0.05
+  weight_decay: 0.05   # 0.05
   class_weight_mode: inv_sqrt
   amp: true
 

@@ -36,6 +36,42 @@ def _read_config(path: Path) -> dict[str, Any]:
     return loaded or {}
 
 
+def _deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(merged.get(key), dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _load_config_with_base(path: Path, seen: tuple[Path, ...] = ()) -> dict[str, Any]:
+    resolved_path = path.resolve()
+    if resolved_path in seen:
+        chain = " -> ".join(str(item) for item in (*seen, resolved_path))
+        raise ValueError(f"Detected cyclic config inheritance: {chain}")
+
+    raw = _read_config(resolved_path)
+    if not isinstance(raw, dict):
+        raise ValueError(f"Config root must be a mapping: {resolved_path}")
+
+    base_value = raw.pop("_base_", None)
+    if base_value is None:
+        return raw
+    if not isinstance(base_value, str) or not base_value.strip():
+        raise ValueError(f"_base_ must be a non-empty string: {resolved_path}")
+
+    base_path = Path(base_value)
+    if not base_path.is_absolute():
+        base_path = resolved_path.parent / base_path
+    if not base_path.exists():
+        raise FileNotFoundError(f"Base config not found: {base_path}")
+
+    base_raw = _load_config_with_base(base_path, (*seen, resolved_path))
+    return _deep_merge_dicts(base_raw, raw)
+
+
 def _build_dataclass(cls, payload: dict[str, Any]):
     allowed = {f.name for f in fields(cls)}
     return cls(**{k: v for k, v in payload.items() if k in allowed})
@@ -77,7 +113,7 @@ def _build_data_config(payload: dict[str, Any]) -> DataConfig:
 
 
 def load_train_config(path: str | Path, args: object | None = None) -> TrainConfig:
-    raw = _read_config(Path(path))
+    raw = _load_config_with_base(Path(path))
     task_raw = dict(raw.get("task", {}))
     if _has_nonempty_value(task_raw.get("output")):
         task_raw["output_explicit"] = True
