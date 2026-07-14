@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 import argparse
 import os
@@ -30,8 +32,18 @@ def build_arg_parser():
         default=str(ROOT / "configs" / "cls_default.yaml"),
         help="配置文件路径。可为空。默认: %(default)s",
     )
-    parser.add_argument("--data", type=str, required=True, help="训练数据集根目录。必填。")
-    parser.add_argument("--project", type=str, required=True, help="训练输出的项目目录名称。必填。")
+    parser.add_argument(
+        "--data",
+        type=str,
+        default=None,
+        help="训练数据集根目录。可为空；为空时使用配置文件中的 data.root，传入时覆盖配置值。",
+    )
+    parser.add_argument(
+        "--project",
+        type=str,
+        default=None,
+        help="训练输出的项目目录名称。可为空；为空时使用配置文件中的 task.project，传入时覆盖配置值。",
+    )
     parser.add_argument(
         "--name",
         type=str,

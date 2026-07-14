@@ -165,6 +165,12 @@ def evaluate_checkpoint_directory(
         "eval_loss": eval_out["val_loss"],
         "eval_acc_top1": eval_out["val_acc_top1"],
         "eval_acc_top5": eval_out["val_acc_top5"],
+        "eval_macro_f1": eval_out.get("macro_f1"),
+        "eval_balanced_accuracy": eval_out.get("balanced_accuracy"),
+        "eval_worst_class_recall": eval_out.get("worst_class_recall"),
+        "eval_ece": eval_out.get("ece"),
+        "eval_brier_score": eval_out.get("brier_score"),
+        "eval_nll": eval_out.get("nll", eval_out["val_loss"]),
         "elapsed_sec": elapsed_sec,
     })
     _print_eval_summary(eval_out, info["classes"], len(eval_dataset), elapsed_sec)

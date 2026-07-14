@@ -113,8 +113,12 @@ class TrainSettings:
     batch_size: int = 16
     lr: float = 3e-4
     weight_decay: float = 0.05
-    class_weight_mode: str = "inv_sqrt"
+    class_weight_mode: str = "none"
+    label_smoothing: float = 0.05
     amp: bool = True
+    warmup_epochs: float = 5.0
+    warmup_steps: int | str = "auto"
+    min_lr_ratio: float = 0.01
 
 
 @dataclass
@@ -129,6 +133,7 @@ class DistributedConfig:
 class EvalConfig:
     print_top_wrong: int = 20
     save_predictions: bool = True
+    calibration_bins: int = 15
 
 
 @dataclass
@@ -149,16 +154,33 @@ class TrainConfig:
             raise ValueError("task.project must not be empty")
         if not self.task.name:
             raise ValueError("task.name must not be empty")
+        if not self.data.root or not self.data.root.strip():
+            raise ValueError("data.root must be set in the config file or provided with --data")
         if not (0.0 < self.data.val_ratio < 1.0):
             raise ValueError(f"val_ratio must be in (0, 1), got {self.data.val_ratio}")
         if not (0.0 <= self.data.test_ratio < 1.0):
             raise ValueError(f"test_ratio must be in [0, 1), got {self.data.test_ratio}")
         if self.data.val_ratio + self.data.test_ratio >= 1.0:
             raise ValueError("val_ratio + test_ratio must be less than 1")
-        if self.train.class_weight_mode not in {"inv", "inv_sqrt"}:
-            raise ValueError("class_weight_mode must be 'inv' or 'inv_sqrt'")
+        if self.train.class_weight_mode not in {"none", "inv", "inv_sqrt"}:
+            raise ValueError("class_weight_mode must be 'none', 'inv', or 'inv_sqrt'")
+        if not (0.0 <= self.train.label_smoothing < 1.0):
+            raise ValueError("train.label_smoothing must be in [0, 1)")
         if self.train.patience < 0:
             raise ValueError("train.patience must be >= 0")
+        if self.train.warmup_epochs < 0:
+            raise ValueError("train.warmup_epochs must be >= 0")
+        if not (
+            self.train.warmup_steps == "auto"
+            or (
+                isinstance(self.train.warmup_steps, int)
+                and not isinstance(self.train.warmup_steps, bool)
+                and self.train.warmup_steps >= 0
+            )
+        ):
+            raise ValueError("train.warmup_steps must be 'auto' or a non-negative integer")
+        if not (0.0 <= self.train.min_lr_ratio <= 1.0):
+            raise ValueError("train.min_lr_ratio must be in [0, 1]")
         if self.data.preprocess not in {"crop", "letterbox", "stretch"}:
             raise ValueError("preprocess must be 'crop', 'letterbox', or 'stretch'")
         if self.data.augment_backend not in {"cpu", "gpu"}:
@@ -166,6 +188,8 @@ class TrainConfig:
         _validate_augment_config(self.data.augment)
         if self.distributed.backend not in {"nccl", "gloo"}:
             raise ValueError("distributed backend must be 'nccl' or 'gloo'")
+        if self.eval.calibration_bins <= 0:
+            raise ValueError("eval.calibration_bins must be a positive integer")
         if not is_valid_device_spec(self.device):
             raise ValueError("device must be auto, cpu, cuda, a GPU id like 1, or a GPU list like 0,1,2")
         if self.distributed.port_range_start >= self.distributed.port_range_end:

@@ -13,7 +13,15 @@ from cls_engine.distributed.ddp import (
     reduce_sum,
     safe_all_gather_object,
 )
-from cls_engine.metrics.classification import compute_topk_correct
+from cls_engine.metrics import classification as classification_metrics
+
+
+compute_topk_correct = classification_metrics.compute_topk_correct
+metrics_from_confusion_matrix = getattr(
+    classification_metrics,
+    "metrics_from_confusion_matrix",
+    lambda _cm: {"macro_f1": 0.0, "balanced_accuracy": 0.0, "worst_class_recall": 0.0},
+)
 
 
 def now() -> float:
@@ -28,6 +36,8 @@ def train_one_epoch(
     device,
     epoch,
     criterion,
+    scheduler=None,
+    amp_enabled: bool = True,
     log_interval=50,
     batch_transform=None,
     announce_first_batch_wait: bool = False,
@@ -41,6 +51,7 @@ def train_one_epoch(
     total_correct_top1 = 0
     total_correct_top5 = 0
     total_num = 0
+    amp_skipped_steps = 0
 
     if announce_first_batch_wait and is_main_process():
         print(f"[{announce_prefix}] waiting for first batch...")
@@ -52,12 +63,19 @@ def train_one_epoch(
         if batch_transform is not None:
             x = batch_transform(x)
         optimizer.zero_grad(set_to_none=True)
-        with amp.autocast(device_type="cuda", enabled=(device.type == "cuda")):
+        use_amp = device.type == "cuda" and amp_enabled
+        with amp.autocast(device_type="cuda", enabled=use_amp):
             logits = model(x)
             loss = criterion(logits, y)
         scaler.scale(loss).backward()
+        scale_before = scaler.get_scale() if scaler.is_enabled() else None
         scaler.step(optimizer)
         scaler.update()
+        optimizer_updated = not scaler.is_enabled() or scaler.get_scale() >= scale_before
+        if scheduler is not None and optimizer_updated:
+            scheduler.step()
+        if not optimizer_updated:
+            amp_skipped_steps += 1
 
         bs = x.size(0)
         total_loss += loss.item() * bs
@@ -77,11 +95,14 @@ def train_one_epoch(
     t_cor_top1 = reduce_sum(torch.tensor(total_correct_top1, device=device, dtype=torch.float64))
     t_cor_top5 = reduce_sum(torch.tensor(total_correct_top5, device=device, dtype=torch.float64))
     t_num = reduce_sum(torch.tensor(total_num, device=device, dtype=torch.float64))
+    t_amp_skipped = torch.tensor(amp_skipped_steps, device=device, dtype=torch.int64)
+    if is_dist_avail_and_initialized():
+        dist.all_reduce(t_amp_skipped, op=dist.ReduceOp.MAX)
 
     avg_loss = (t_loss / torch.clamp(t_num, min=1)).item()
     avg_acc_top1 = (t_cor_top1 / torch.clamp(t_num, min=1)).item()
     avg_acc_top5 = (t_cor_top5 / torch.clamp(t_num, min=1)).item()
-    return avg_loss, avg_acc_top1, avg_acc_top5, now() - start
+    return avg_loss, avg_acc_top1, avg_acc_top5, now() - start, int(t_amp_skipped.item())
 
 
 @torch.no_grad()
@@ -93,8 +114,10 @@ def evaluate_with_details(
     batch_transform=None,
     log_interval: int = 0,
     log_prefix: str = "Eval",
+    calibration_bins: int = 15,
 ) -> dict[str, Any]:
     model.eval()
+    eval_model = model.module if hasattr(model, "module") else model
     if batch_transform is not None:
         batch_transform.eval()
     class_count = len(class_names)
@@ -104,6 +127,8 @@ def evaluate_with_details(
     total_correct_top5 = 0
     total_num = 0
     cm_local = torch.zeros((class_count, class_count), device=device, dtype=torch.int64)
+    calibration_local = torch.zeros((calibration_bins, 3), device=device, dtype=torch.float64)
+    brier_sum_local = torch.zeros((), device=device, dtype=torch.float64)
     preds_local = []
 
     for it, (x, y, paths) in enumerate(loader):
@@ -111,10 +136,12 @@ def evaluate_with_details(
         y = y.to(device, non_blocking=True)
         if batch_transform is not None:
             x = batch_transform(x)
-        logits = model(x)
+        logits = eval_model(x)
         probs = torch.softmax(logits, dim=1)
         conf, pred = probs.max(dim=1)
         loss_sum = F.cross_entropy(logits, y, reduction="sum")
+        one_hot = F.one_hot(y, num_classes=class_count).to(probs.dtype)
+        brier_sum_local += ((probs - one_hot) ** 2).sum(dim=1).sum().double()
         total_loss_sum += loss_sum.item()
         total_correct_top1 += (pred == y).sum().item()
         total_correct_top5 += compute_topk_correct(logits, y, k=5)
@@ -122,6 +149,10 @@ def evaluate_with_details(
 
         for gt_i, pr_i in zip(y.view(-1), pred.view(-1)):
             cm_local[gt_i.long(), pr_i.long()] += 1
+        bin_indices = torch.clamp((conf * calibration_bins).long(), max=calibration_bins - 1)
+        calibration_local[:, 0].scatter_add_(0, bin_indices, torch.ones_like(conf, dtype=torch.float64))
+        calibration_local[:, 1].scatter_add_(0, bin_indices, conf.double())
+        calibration_local[:, 2].scatter_add_(0, bin_indices, (pred == y).double())
         for path, gt_i, pr_i, cf in zip(
             paths,
             y.detach().cpu().tolist(),
@@ -149,10 +180,33 @@ def evaluate_with_details(
     val_acc_top5 = (t_cor_top5 / torch.clamp(t_num, min=1)).item()
 
     cm_total = cm_local.clone()
+    calibration_total = calibration_local.clone()
+    brier_sum_total = brier_sum_local.clone()
     if is_dist_avail_and_initialized():
         dist.all_reduce(cm_total, op=dist.ReduceOp.SUM)
+        dist.all_reduce(calibration_total, op=dist.ReduceOp.SUM)
+        dist.all_reduce(brier_sum_total, op=dist.ReduceOp.SUM)
+    bin_counts = calibration_total[:, 0]
+    nonempty = bin_counts > 0
+    bin_confidence = torch.zeros_like(bin_counts)
+    bin_accuracy = torch.zeros_like(bin_counts)
+    bin_confidence[nonempty] = calibration_total[nonempty, 1] / bin_counts[nonempty]
+    bin_accuracy[nonempty] = calibration_total[nonempty, 2] / bin_counts[nonempty]
+    ece = ((bin_counts / torch.clamp(t_num, min=1)) * (bin_accuracy - bin_confidence).abs()).sum().item()
+    brier_score = (brier_sum_total / torch.clamp(t_num, min=1)).item()
+    class_metrics = metrics_from_confusion_matrix(cm_total.detach().cpu().numpy())
     gathered = safe_all_gather_object(preds_local)
-    out: dict[str, Any] = {"val_loss": val_loss, "val_acc_top1": val_acc_top1, "val_acc_top5": val_acc_top5}
+    out: dict[str, Any] = {
+        "val_loss": val_loss,
+        "val_acc_top1": val_acc_top1,
+        "val_acc_top5": val_acc_top5,
+        "macro_f1": class_metrics["macro_f1"],
+        "balanced_accuracy": class_metrics["balanced_accuracy"],
+        "worst_class_recall": class_metrics["worst_class_recall"],
+        "ece": ece,
+        "brier_score": brier_score,
+        "nll": val_loss,
+    }
     if is_main_process():
         all_rows = []
         for part in gathered:

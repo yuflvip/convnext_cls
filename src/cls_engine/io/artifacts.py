@@ -17,8 +17,8 @@ class ArtifactWriter:
             {"classes": class_names, "class_to_idx": {name: i for i, name in enumerate(class_names)}},
         )
 
-    def write_run_config(self, payload: dict[str, Any]) -> None:
-        write_json(self.out_dir / "run_config.json", payload)
+    def write_args(self, payload: dict[str, Any]) -> None:
+        write_json(self.out_dir / "args.json", payload)
 
     def write_split_indices(self, payload: dict[str, Any]) -> None:
         write_json(self.out_dir / "split_indices.json", payload)

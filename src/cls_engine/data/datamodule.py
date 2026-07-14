@@ -17,6 +17,7 @@ from .dataset import (
     remap_dataset_to_class_order,
 )
 from .splits import stratified_split_indices
+from .samplers import DistributedEvalSampler
 from .transforms import build_eval_transform, build_train_transform
 
 
@@ -159,9 +160,9 @@ def prepare_data(cfg: DataConfig, seed: int, batch_size: int, progress_logger=No
         val_counts = _compute_counts_from_labels(all_labels, len(class_names), val_idx)
 
     train_sampler = DistributedSampler(train_set, shuffle=True, drop_last=True) if is_dist_avail_and_initialized() else None
-    val_sampler = DistributedSampler(val_set, shuffle=False, drop_last=False) if is_dist_avail_and_initialized() else None
+    val_sampler = DistributedEvalSampler(val_set) if is_dist_avail_and_initialized() else None
     test_sampler = (
-        DistributedSampler(test_set, shuffle=False, drop_last=False)
+        DistributedEvalSampler(test_set)
         if test_set is not None and is_dist_avail_and_initialized()
         else None
     )

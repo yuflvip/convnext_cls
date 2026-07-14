@@ -42,7 +42,11 @@ def compute_class_counts_from_indices(dataset, indices: list[int]) -> np.ndarray
     return counts
 
 
-def build_class_weights(counts: np.ndarray, mode: str = "inv_sqrt") -> torch.Tensor:
+def build_class_weights(counts: np.ndarray, mode: str = "inv_sqrt") -> torch.Tensor | None:
+    if mode == "none":
+        return None
+    if mode not in {"inv", "inv_sqrt"}:
+        raise ValueError("class weight mode must be 'none', 'inv', or 'inv_sqrt'")
     counts = np.maximum(counts, 1)
     if mode == "inv":
         weights = 1.0 / counts

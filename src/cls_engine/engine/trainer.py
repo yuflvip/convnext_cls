@@ -34,6 +34,7 @@ from cls_engine.engine.loops import evaluate_with_details, train_one_epoch
 from cls_engine.io.artifacts import ArtifactWriter
 from cls_engine.models.checkpoint import load_checkpoint, save_best_checkpoint, save_last_checkpoint, unwrap_model
 from cls_engine.models.factory import build_model
+from cls_engine.metrics.plots import plot_training_results
 from cls_engine.utils.paths import ensure_dir, resolve_output_dir
 from cls_engine.utils.seed import set_seed
 
@@ -46,7 +47,16 @@ RESULTS_CSV_HEADER = [
     "val_loss",
     "val_acc_top1",
     "val_acc_top5",
-    "lr",
+    "val_macro_f1",
+    "val_balanced_accuracy",
+    "val_worst_class_recall",
+    "val_ece",
+    "val_brier_score",
+    "val_nll",
+    "lr_start",
+    "lr_end",
+    "amp_skipped_steps",
+    "is_best",
     "epoch_time_sec",
 ]
 
@@ -55,15 +65,28 @@ def _run_id() -> str:
     return f"{int(time.time())}-{os.getpid()}"
 
 
-def _build_scheduler(optimizer, epochs: int, steps_per_epoch: int):
+def _build_scheduler(
+    optimizer,
+    epochs: int,
+    steps_per_epoch: int,
+    warmup_epochs: float = 5.0,
+    warmup_steps: int | str = "auto",
+    min_lr_ratio: float = 0.01,
+):
     total_steps = max(1, epochs * max(1, steps_per_epoch))
-    warmup_steps = max(100, int(0.05 * total_steps))
+    resolved_warmup_steps = (
+        int(round(warmup_epochs * steps_per_epoch))
+        if warmup_steps == "auto"
+        else int(warmup_steps)
+    )
+    resolved_warmup_steps = min(total_steps, max(0, resolved_warmup_steps))
 
     def lr_lambda(step: int) -> float:
-        if step < warmup_steps:
-            return float(step) / float(max(1, warmup_steps))
-        progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-        return 0.5 * (1.0 + math.cos(math.pi * progress))
+        if step < resolved_warmup_steps:
+            return float(step + 1) / float(max(1, resolved_warmup_steps))
+        progress = float(step - resolved_warmup_steps) / float(max(1, total_steps - resolved_warmup_steps))
+        cosine = 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
@@ -127,7 +150,7 @@ def _update_early_stop_state(
 
 def _write_initial_artifacts(writer: ArtifactWriter, cfg: TrainConfig, data: PreparedData, port_info: dict) -> None:
     writer.write_classes(data.class_names)
-    writer.write_run_config({
+    writer.write_args({
         "config": cfg.to_dict(),
         "dataset_layout": _dataset_layout_payload(data),
         "distributed": {
@@ -219,7 +242,9 @@ def run_training(cfg: TrainConfig) -> None:
                 augment=cfg.data.augment,
             ).to(device)
 
-        class_weights = build_class_weights(data.train_counts, mode=cfg.train.class_weight_mode).to(device)
+        class_weights = build_class_weights(data.train_counts, mode=cfg.train.class_weight_mode)
+        if class_weights is not None:
+            class_weights = class_weights.to(device)
         model = build_model(
             cfg.model.name,
             num_classes=data.num_classes,
@@ -236,15 +261,27 @@ def run_training(cfg: TrainConfig) -> None:
             )
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
-        scheduler = _build_scheduler(optimizer, cfg.train.epochs, len(data.train_loader))
+        scheduler = _build_scheduler(
+            optimizer,
+            cfg.train.epochs,
+            len(data.train_loader),
+            warmup_epochs=cfg.train.warmup_epochs,
+            warmup_steps=cfg.train.warmup_steps,
+            min_lr_ratio=cfg.train.min_lr_ratio,
+        )
         scaler = amp.GradScaler(enabled=(device.type == "cuda" and cfg.train.amp))
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
+        criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=cfg.train.label_smoothing,
+        )
         best_val_acc = -1.0
         best_epoch = 0
         early_stopped = False
         stopped_epoch = cfg.train.epochs
         test_acc = None
         test_loss = None
+        test_metrics = None
+        best_val_metrics = None
 
         for epoch in range(1, cfg.train.epochs + 1):
             sampler = getattr(data.train_loader, "sampler", None)
@@ -253,7 +290,8 @@ def run_training(cfg: TrainConfig) -> None:
             if epoch == 1 and is_main_process():
                 _print_startup_stage("starting training loop...")
 
-            train_loss, train_acc_top1, train_acc_top5, train_time = train_one_epoch(
+            lr_start = optimizer.param_groups[0]["lr"]
+            train_loss, train_acc_top1, train_acc_top5, train_time, amp_skipped_steps = train_one_epoch(
                 model,
                 data.train_loader,
                 optimizer,
@@ -261,20 +299,20 @@ def run_training(cfg: TrainConfig) -> None:
                 device,
                 epoch,
                 criterion,
+                scheduler=scheduler,
+                amp_enabled=cfg.train.amp,
                 log_interval=50,
                 batch_transform=train_batch_transform,
                 announce_first_batch_wait=(epoch == 1),
                 announce_prefix="Train",
             )
-            for _ in range(len(data.train_loader)):
-                scheduler.step()
-
             eval_out = evaluate_with_details(
                 model,
                 data.val_loader,
                 device,
                 data.class_names,
                 batch_transform=eval_batch_transform,
+                calibration_bins=cfg.eval.calibration_bins,
             )
             val_loss = eval_out["val_loss"]
             val_acc_top1 = eval_out["val_acc_top1"]
@@ -287,14 +325,28 @@ def run_training(cfg: TrainConfig) -> None:
                 patience=cfg.train.patience,
             )
             early_stop_enabled = cfg.train.patience > 0
+            if is_best_epoch:
+                best_val_metrics = {
+                    key: eval_out[key]
+                    for key in (
+                        "macro_f1",
+                        "balanced_accuracy",
+                        "worst_class_recall",
+                        "ece",
+                        "brier_score",
+                        "nll",
+                    )
+                }
 
             if is_main_process():
-                lr_now = optimizer.param_groups[0]["lr"]
+                lr_end = optimizer.param_groups[0]["lr"]
                 print(
                     f"\n[Epoch {epoch}] train_loss={train_loss:.4f} "
                     f"train_acc_top1={train_acc_top1:.4f} train_acc_top5={train_acc_top5:.4f} | "
                     f"val_loss={val_loss:.4f} val_acc_top1={val_acc_top1:.4f} "
-                    f"val_acc_top5={val_acc_top5:.4f} | lr={lr_now:.6g} time={train_time:.1f}s"
+                    f"val_acc_top5={val_acc_top5:.4f} macro_f1={eval_out['macro_f1']:.4f} "
+                    f"balanced_acc={eval_out['balanced_accuracy']:.4f} ece={eval_out['ece']:.4f} | "
+                    f"lr={lr_start:.6g}->{lr_end:.6g} amp_skips={amp_skipped_steps} time={train_time:.1f}s"
                 )
                 if is_best_epoch:
                     save_best_checkpoint(
@@ -321,7 +373,16 @@ def run_training(cfg: TrainConfig) -> None:
                         f"{val_loss:.6f}",
                         f"{val_acc_top1:.6f}",
                         f"{val_acc_top5:.6f}",
-                        f"{lr_now:.8f}",
+                        f"{eval_out['macro_f1']:.6f}",
+                        f"{eval_out['balanced_accuracy']:.6f}",
+                        f"{eval_out['worst_class_recall']:.6f}",
+                        f"{eval_out['ece']:.6f}",
+                        f"{eval_out['brier_score']:.6f}",
+                        f"{eval_out['nll']:.6f}",
+                        f"{lr_start:.8f}",
+                        f"{lr_end:.8f}",
+                        amp_skipped_steps,
+                        int(is_best_epoch),
                         f"{train_time:.4f}",
                     ],
                     RESULTS_CSV_HEADER,
@@ -350,9 +411,21 @@ def run_training(cfg: TrainConfig) -> None:
                 device,
                 data.class_names,
                 batch_transform=eval_batch_transform,
+                calibration_bins=cfg.eval.calibration_bins,
             )
             test_loss = test_out["val_loss"]
             test_acc = test_out["val_acc_top1"]
+            test_metrics = {
+                key: test_out[key]
+                for key in (
+                    "macro_f1",
+                    "balanced_accuracy",
+                    "worst_class_recall",
+                    "ece",
+                    "brier_score",
+                    "nll",
+                )
+            }
             if is_main_process():
                 write_eval_artifacts(writer, "test", test_out, data.class_names, cfg.eval.print_top_wrong)
 
@@ -360,11 +433,13 @@ def run_training(cfg: TrainConfig) -> None:
             writer.write_final_summary({
                 "best_val_acc": best_val_acc,
                 "best_epoch": best_epoch,
+                "best_val_metrics": best_val_metrics,
                 "early_stopped": early_stopped,
                 "stopped_epoch": stopped_epoch,
                 "patience": cfg.train.patience,
                 "test_acc": test_acc,
                 "test_loss": test_loss,
+                "test_metrics": test_metrics,
                 "num_classes": data.num_classes,
                 "class_names": data.class_names,
                 "train_samples": len(data.train_indices),
@@ -372,6 +447,11 @@ def run_training(cfg: TrainConfig) -> None:
                 "test_samples": len(data.test_set) if data.test_set is not None else 0,
                 "split_mode": data.layout.mode,
             })
+            try:
+                results_plot, diagnostics_plot = plot_training_results(out_dir / "results.csv", out_dir)
+                print(f"Saved training plots: {results_plot.name}, {diagnostics_plot.name}")
+            except Exception as exc:
+                print(f"[Warning] failed to generate training plots: {exc}")
             print(f"Training done. Best val acc = {best_val_acc:.4f}")
             print(f"Outputs in: {Path(cfg.task.output).resolve()}")
     finally:

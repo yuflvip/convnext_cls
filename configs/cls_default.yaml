@@ -95,7 +95,7 @@ data:
       # 缩放比例下界。0.95
       scale_min: 0.8
       # 缩放比例上界。需 >= scale_min。1.05
-      scale_max: 1.20
+      scale_max: 1.2
     resized_crop:
       # 是否启用随机裁剪缩放增强。
       # 该增强只在 preprocess=crop 时生效。
@@ -132,7 +132,30 @@ train:
   patience: 40
   batch_size: 32
   lr: 0.0001
-  weight_decay: 0.05   # 0.05
+  # Warmup 持续的 epoch 数，仅在 warmup_steps=auto 时使用。
+  # 实际 warmup step = warmup_epochs * 每个 epoch 的训练 batch 数，并自动限制为不超过总训练 step。
+  # 预训练模型微调通常建议 3~5；batch 很大或学习率较高时可尝试 5~10；设为 0 可关闭 warmup。
+  warmup_epochs: 5
+  # Warmup step 的控制方式。
+  # auto：按上面的 warmup_epochs 自动换算，数据量、batch size 或 GPU 数变化时会自动适配，推荐使用。
+  # 也可手动填写非负整数，例如 500；手动整数优先于 warmup_epochs，填写 0 可关闭 warmup。
+  warmup_steps: auto
+  # 余弦退火结束时的最小学习率比例，最终目标学习率 = lr * min_lr_ratio。
+  # 0 表示衰减到 0；0.01 表示保留初始学习率的 1%。常用范围为 0~0.05。
+  min_lr_ratio: 0.01
+  # AdamW 的权重衰减系数，用于抑制参数过度增大和训练集过拟合，仅影响训练。
+  # 预训练图像分类模型微调常用 0.01~0.05，当前默认 0.05。
+  # 训练准确率很高但验证集明显变差时可适当增大；模型欠拟合或小数据集微调受限时可尝试减小。
+  # 建议对比 0.01 / 0.03 / 0.05；该参数不会增加推理或后处理耗时。
+  weight_decay: 0.05
+  # 标签平滑强度，仅影响训练损失。0 表示关闭，预训练模型微调建议先尝试 0.05。
+  # 标签噪声较多或模型明显过度自信时可对比 0.1；过大会削弱细粒度类别区分能力。
+  # 它不会改变模型结构或推理逻辑，但新模型的业务置信度阈值应重新评估。
+  label_smoothing: 0.05
+  # 类别权重策略：
+  # none：不加类别权重，适合类别相对均衡的数据，建议作为默认基线。
+  # inv_sqrt：按类别样本数平方根的倒数加权，对少数类进行温和补偿。
+  # inv：按类别样本数倒数加权，补偿较强，仅建议在类别严重不平衡时使用。
   class_weight_mode: inv_sqrt
   amp: true
 
@@ -145,3 +168,7 @@ distributed:
 eval:
   print_top_wrong: 20
   save_predictions: true
+  # ECE（Expected Calibration Error）的置信度分桶数量。
+  # 15 是常用默认值；验证样本较少时可降到 10，样本很多时可提高到 20~30。
+  # 分桶越多不代表越准确，桶内样本过少时 ECE 波动反而会增大。
+  calibration_bins: 15
