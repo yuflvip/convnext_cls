@@ -1,30 +1,15 @@
+_base_: cls_default.yaml
+
 task:
-  # 项目目录名称。默认输出目录模式下会写入 runs/classify/{project}/{name}
-  project: default_project
-  # 运行名称。留空时自动生成 exp_YYYYMMDDHHmmss
-  name: ""
-  seed: 42
-  # 显式输出目录。留空时使用默认路径 runs/classify/{project}/{name}
-  # 不建议直接写成字面量 "runs/classify/{project}/{name}"，因为当前不会做模板替换。
-  output: ""
-  # 为 true 时允许复用已存在的输出目录
-  exist_ok: false
+  project: classify_road_clear
+
+model:
+  name: hgnetv2_b5.ssld_stage2_ft_in1k
 
 data:
-  root: /path/to/dataset
-  img_size: 224
-  val_ratio: 0.1
-  test_ratio: 0.1
-  num_workers: 8
-  # 输入几何预处理方式：
-  # stretch: 直接拉伸到目标尺寸，不保留原始宽高比
-  # letterbox: 等比缩放后补边到目标尺寸，保留原始宽高比
-  # crop: 先缩放到稍大尺寸，再做中心裁剪；训练时若 augment.resized_crop.enabled=true，则改为随机裁剪增强
-  preprocess: stretch
-  # 数据增强执行后端：
-  # cpu: 使用 torchvision 的 CPU 变换，增强能力最完整，适合调试和精细控制
-  # gpu: 使用 Kornia 的 GPU batch 增强，吞吐更高，但当前不支持 jpeg 增强
-  augment_backend: gpu
+  root: /mnt/imgs_coco_datasets_145/2026_imgs_datasets/imgs_cls_road_clear
+  test_ratio: 0.
+
   augment:
     # 是否启用训练增强总开关。
     # false 时，下面各增强项即使 enabled=true 也不会生效。
@@ -35,28 +20,28 @@ data:
       enabled: true
       # 水平翻转概率，范围 [0, 1]。
       # 0.5 表示约一半样本会被翻转。
-      p: 0.5
+      p: 0.25
     color_jitter:
       # 是否启用亮度、对比度、饱和度、色相扰动。
       # 适合提升不同光照和摄像头条件下的泛化能力。
-      enabled: true
+      enabled: false
       # 整体颜色扰动生效概率，范围 [0, 1]。
       # 1.0 表示每张图都会执行一次 ColorJitter。
       p: 0.7
       # 亮度扰动强度。值越大，亮暗变化越明显。0.2
-      brightness: 0.25
+      brightness: 0.5
       # 对比度扰动强度。值越大，明暗层次变化越明显。0.2
-      contrast: 0.25
+      contrast: 0.5
       # 饱和度扰动强度。值越大，颜色浓淡变化越明显。0.2
-      saturation: 0.25
+      saturation: 0.5
       # 色相扰动强度。通常保持较小，过大容易破坏真实颜色分布。0.02
-      hue: 0.05
+      hue: 0.1
     blur:
       # 是否启用高斯模糊增强。
       # 适合模拟轻微失焦、低清晰度或采集抖动场景。
-      enabled: true
+      enabled: false
       # 高斯模糊生效概率，范围 [0, 1]。
-      p: 0.1
+      p: 0.25
       # 高斯核大小，必须是正奇数，例如 3、5、7。
       # 值越大，模糊越明显。
       kernel_size: 3
@@ -67,7 +52,7 @@ data:
     erasing:
       # 是否启用随机擦除。
       # 适合模拟局部遮挡，但对依赖局部结构的任务要谨慎。
-      enabled: true
+      enabled: false
       # 随机擦除生效概率，范围 [0, 1]。
       p: 0.1
       # 擦除区域面积占整图面积的下界。
@@ -86,7 +71,7 @@ data:
       # 适合模拟轻微视角变化、抖动和平移，不建议设置过大。
       enabled: true
       # 仿射增强生效概率，范围 [0, 1]。
-      p: 0.1
+      p: 0.25
       # 最大旋转角度，单位为度。实际会在 [-degrees, degrees] 内采样。
       degrees: 10.0
       # 平移比例，取值范围 [0, 1)。
@@ -96,46 +81,16 @@ data:
       scale_min: 0.8
       # 缩放比例上界。需 >= scale_min。1.05
       scale_max: 1.2
-    resized_crop:
-      # 是否启用随机裁剪缩放增强。
-      # 该增强只在 preprocess=crop 时生效。
-      # 打开后，训练会使用随机裁剪替代固定中心裁剪。
-      enabled: false
-      # 随机裁剪生效概率，范围 [0, 1]。
-      # 一般保持 1.0，表示启用后每张图都走随机裁剪。
-      p: 1.0
-      # 随机裁剪保留面积比例下界。
-      # 值越小，裁得越狠，尺度扰动越强。
-      scale_min: 0.8
-      # 随机裁剪保留面积比例上界。需 >= scale_min。
-      scale_max: 1.0
-    jpeg:
-      # 是否启用 JPEG 压缩增强。
-      # 适合模拟监控、抓拍、转码等造成的压缩失真。
-      # 当前仅支持 augment_backend=cpu；gpu 路径若开启会直接报错。
-      enabled: false
-      # JPEG 压缩增强生效概率，范围 [0, 1]。
-      p: 0.1
-      # JPEG 质量下界，值越小压缩越重、失真越明显。
-      quality_min: 60
-      # JPEG 质量上界。需 >= quality_min。
-      quality_max: 95
-
-model:
-  # hgnetv2_b5.ssld_stage2_ft_in1k / convnext_nano.in12k_ft_in1k / hgnetv2_b4.ssld_stage2_ft_in1k / hgnetv2_b6.ssld_stage2_ft_in1k
-  name: hgnetv2_b5.ssld_stage2_ft_in1k
-  pretrained: true
-  cache_dir: /mnt/sdb/cls_dataset_clean/pretrained_cache/huggingface/hub
 
 train:
-  epochs: 200
-  patience: 40
-  batch_size: 32
+  epochs: 100
+  patience: 20
+  batch_size: 64
   lr: 0.0001
   # Warmup 持续的 epoch 数，仅在 warmup_steps=auto 时使用。
   # 实际 warmup step = warmup_epochs * 每个 epoch 的训练 batch 数，并自动限制为不超过总训练 step。
   # 预训练模型微调通常建议 3~5；batch 很大或学习率较高时可尝试 5~10；设为 0 可关闭 warmup。
-  warmup_epochs: 5
+  warmup_epochs: 3
   # Warmup step 的控制方式。
   # auto：按上面的 warmup_epochs 自动换算，数据量、batch size 或 GPU 数变化时会自动适配，推荐使用。
   # 也可手动填写非负整数，例如 500；手动整数优先于 warmup_epochs，填写 0 可关闭 warmup。
@@ -147,7 +102,7 @@ train:
   # 预训练图像分类模型微调常用 0.01~0.05，当前默认 0.05。
   # 训练准确率很高但验证集明显变差时可适当增大；模型欠拟合或小数据集微调受限时可尝试减小。
   # 建议对比 0.01 / 0.03 / 0.05；该参数不会增加推理或后处理耗时。
-  weight_decay: 0.05
+  weight_decay: 0.05   # 0.05
   # 标签平滑强度，仅影响训练损失。0 表示关闭，预训练模型微调建议先尝试 0.05。
   # 标签噪声较多或模型明显过度自信时可对比 0.1；过大会削弱细粒度类别区分能力。
   # 它不会改变模型结构或推理逻辑，但新模型的业务置信度阈值应重新评估。
@@ -158,17 +113,3 @@ train:
   # inv：按类别样本数倒数加权，补偿较强，仅建议在类别严重不平衡时使用。
   class_weight_mode: inv_sqrt
   amp: true
-
-distributed:
-  backend: nccl
-  master_port: auto
-  port_range_start: 20000
-  port_range_end: 65000
-
-eval:
-  print_top_wrong: 20
-  save_predictions: true
-  # ECE（Expected Calibration Error）的置信度分桶数量。
-  # 15 是常用默认值；验证样本较少时可降到 10，样本很多时可提高到 20~30。
-  # 分桶越多不代表越准确，桶内样本过少时 ECE 波动反而会增大。
-  calibration_bins: 15

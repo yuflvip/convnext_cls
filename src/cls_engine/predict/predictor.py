@@ -108,9 +108,12 @@ def write_prediction_outputs(output_dir: str | Path, rows: list[dict]) -> None:
 
 
 def print_prediction_progress(index: int, total: int, row: dict) -> None:
+    topk_text = ", ".join(f"{name}:{score:.4f}" for name, score in row.get("topk", []))
+    topk_suffix = f" topk=[{topk_text}]" if topk_text else ""
     print(
         f"[Predict] {index}/{total} {row['path']} -> "
         f"class={row['pred_name']} id={row['pred_idx']} conf={row['conf']:.4f}"
+        f"{topk_suffix}"
     )
 
 

@@ -8,7 +8,7 @@ model:
 
 data:
   root: /mnt/imgs_coco_datasets_145/2026_imgs_datasets/imgs_cls_fanguangyi/
-  test_ratio: 0.
+  # test_ratio: 0.
 
 train:
   epochs: 150
@@ -18,7 +18,7 @@ train:
   # Warmup 持续的 epoch 数，仅在 warmup_steps=auto 时使用。
   # 实际 warmup step = warmup_epochs * 每个 epoch 的训练 batch 数，并自动限制为不超过总训练 step。
   # 预训练模型微调通常建议 3~5；batch 很大或学习率较高时可尝试 5~10；设为 0 可关闭 warmup。
-  warmup_epochs: 1
+  warmup_epochs: 3
   # Warmup step 的控制方式。
   # auto：按上面的 warmup_epochs 自动换算，数据量、batch size 或 GPU 数变化时会自动适配，推荐使用。
   # 也可手动填写非负整数，例如 500；手动整数优先于 warmup_epochs，填写 0 可关闭 warmup。
