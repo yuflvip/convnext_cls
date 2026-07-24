@@ -1,13 +1,13 @@
 _base_: cls_default.yaml
 
 task:
-  project: classify_road_clear
+  project: classify_brightness
 
 model:
   name: hgnetv2_b5.ssld_stage2_ft_in1k
 
 data:
-  root: /mnt/imgs_coco_datasets_145/2026_imgs_datasets/imgs_cls_road_clear
+  root: /mnt/imgs_coco_datasets_145/2026_imgs_datasets/imgs_cls_brightness
   test_ratio: 0.
 
   augment:
