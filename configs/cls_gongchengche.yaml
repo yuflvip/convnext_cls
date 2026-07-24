@@ -4,17 +4,17 @@ task:
   project: classify_gongchengche
 
 model:
-  name: hgnetv2_b5.ssld_stage2_ft_in1k
+  name: hgnetv2_b6.ssld_stage2_ft_in1k
 
 data:
   root: /mnt/imgs_coco_datasets_145/2026_imgs_datasets/imgs_cls_gongchengche/
   test_ratio: 0.
 
 train:
-  epochs: 100
-  patience: 25
-  batch_size: 32
-  lr: 0.0001
+  epochs: 150
+  patience: 40
+  batch_size: 64
+  lr: 0.00001
   # Warmup 持续的 epoch 数，仅在 warmup_steps=auto 时使用。
   # 实际 warmup step = warmup_epochs * 每个 epoch 的训练 batch 数，并自动限制为不超过总训练 step。
   # 预训练模型微调通常建议 3~5；batch 很大或学习率较高时可尝试 5~10；设为 0 可关闭 warmup。
@@ -30,7 +30,7 @@ train:
   # 预训练图像分类模型微调常用 0.01~0.05，当前默认 0.05。
   # 训练准确率很高但验证集明显变差时可适当增大；模型欠拟合或小数据集微调受限时可尝试减小。
   # 建议对比 0.01 / 0.03 / 0.05；该参数不会增加推理或后处理耗时。
-  weight_decay: 0.01   # 0.05
+  weight_decay: 0.03   # 0.05
   # 标签平滑强度，仅影响训练损失。0 表示关闭，预训练模型微调建议先尝试 0.05。
   # 标签噪声较多或模型明显过度自信时可对比 0.1；过大会削弱细粒度类别区分能力。
   # 它不会改变模型结构或推理逻辑，但新模型的业务置信度阈值应重新评估。
